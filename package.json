@@ -1,0 +1,17 @@
+{
+  "name": "aether-editor",
+  "version": "1.5.3",
+  "description": "Zero-gravity Liquid Glass Markdown Editor & File Manager",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-packager . Aether --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon.ico"
+  },
+  "author": "Antigravity",
+  "license": "ISC",
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-packager": "^17.1.2"
+  }
+}

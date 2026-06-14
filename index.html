@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- SEO Best Practices -->
+  <title>Aether | Zero-Gravity Liquid Glass Markdown Editor</title>
+  <meta name="description" content="A premium, zero-gravity workspace featuring a liquid glass styled Markdown editor and file manager over floating ambient gradients.">
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Layer 0: Background Canvas -->
+  <canvas id="ambient-canvas"></canvas>
+  <div class="bg-overlay"></div>
+
+  <!-- Layer 1: Workspace App -->
+  <div class="app-container">
+    
+    <!-- App Header -->
+    <header class="app-header glass-panel" id="app-header">
+      <div class="logo-section">
+        <img src="logo.png" class="logo-icon" alt="Aether Logo">
+        <span class="logo-text">AETHER</span>
+        <span class="logo-badge">V1.5.3</span>
+      </div>
+      
+      <div class="header-doc-title">
+        <svg style="width: 16px; height: 16px; color: var(--text-muted); flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+        </svg>
+        <input type="text" id="doc-name-input" class="doc-name-input" placeholder="document.md" value="untitled.md" title="Document Title">
+      </div>
+      
+      <div class="header-actions">
+        <div class="view-modes-control" id="view-modes-control">
+          <button id="btn-mode-edit" class="view-mode-btn" title="Show Editor pane only">Edit</button>
+          <button id="btn-mode-split" class="view-mode-btn active" title="Show Split Editor and Preview panes">Split</button>
+          <button id="btn-mode-read" class="view-mode-btn" title="Show Preview pane only">Read</button>
+        </div>
+        <span id="save-indicator" style="font-size: 11px; margin-right: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-cyan);">Saved</span>
+        <button id="btn-theme-toggle" class="btn" title="Toggle Light/Dark theme">🌓 Theme: Dark</button>
+        <button id="btn-line-wrap" class="btn" title="Toggle line wrapping inside the text editor">Wrap: OFF</button>
+        <button id="btn-export-md" class="btn" title="Export this document as a markdown file">Export MD</button>
+        <button id="btn-export-html" class="btn" title="Export this document as compiled HTML layout">Export HTML</button>
+        <button id="btn-help" class="btn" style="padding: 8px 10px;" title="Show Markdown formatting guide">?</button>
+      </div>
+    </header>
+
+    <!-- Workspace split frame -->
+    <div class="workspace-frame">
+      
+      <!-- Sidebar panel (File Manager) -->
+      <aside class="sidebar-panel glass-panel" id="sidebar-panel">
+        <div class="sidebar-search">
+          <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+          <input type="text" id="search-input" class="search-input" placeholder="Search documents..." title="Search documents by name">
+        </div>
+        
+        <!-- Navigation Header for VFS Stack view -->
+        <div class="sidebar-nav-header" id="sidebar-nav-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 4px; border-bottom: 1px solid rgba(255,255,255,0.04); display: none;">
+          <button id="btn-nav-back" class="btn" style="padding: 4px 8px; font-size: 11px;" title="Navigate back to parent folder">
+            <svg style="width: 12px; height: 12px; display: block;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+            </svg>
+          </button>
+          <span id="breadcrumb-path" class="pane-meta" style="font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">Root</span>
+        </div>
+        
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-right: 4px;">
+          <h2 class="sidebar-heading" style="margin-bottom: 0;">My Documents</h2>
+          <button id="btn-open-workspace" class="btn" style="padding: 4px 8px; font-size: 10px;" title="Open Workspace folder on disk">📂 Open</button>
+        </div>
+        
+        <!-- Workspace path display -->
+        <div id="workspace-path-display" class="workspace-path-display" title="Active workspace path">Workspace: Loading...</div>
+        
+        <div class="file-list-container" id="file-list">
+          <!-- Dynamic file items injected by app.js -->
+        </div>
+        
+        <div class="sidebar-settings-row" style="display: flex; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: 8px; width: 100%;">
+          <div style="display: flex; gap: 8px; width: 100%;">
+            <button id="btn-sidebar-view" class="btn" style="flex: 1; justify-content: center; font-size: 11px; padding: 6px;" title="Toggle between Fluid Stack and Classic Tree Sidebar views">View: Stack</button>
+            <button id="btn-home-workspace" class="btn" style="flex: 1; justify-content: center; font-size: 11px; padding: 6px; color: var(--accent-cyan);" title="Go to default Guides workspace and refresh guide templates">🏠 Guides</button>
+          </div>
+          <button id="btn-auto-restore" class="btn" style="width: 100%; justify-content: center; font-size: 11px; padding: 6px;" title="Toggle whether Aether automatically restores the last custom workspace on launch">Auto-Restore: OFF</button>
+        </div>
+        <div class="sidebar-actions-row" style="display: flex; gap: 8px; width: 100%;">
+          <button id="new-doc-btn" class="btn btn-primary" style="flex: 1; justify-content: center;">+ New Doc</button>
+          <button id="new-folder-btn" class="btn" style="flex: 1; justify-content: center;">+ New Folder</button>
+        </div>
+      </aside>
+
+      <!-- Main workspace panel (Editor & Preview) -->
+      <main class="main-workspace-panel glass-panel" id="main-workspace-panel">
+        
+        <!-- Left Pane: Editor -->
+        <section class="editor-pane" id="editor-pane">
+          <div class="pane-header">
+            <h3 class="pane-title">Editor</h3>
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <span id="word-count" class="pane-meta">0 words</span>
+              <span id="char-count" class="pane-meta">0 chars</span>
+            </div>
+          </div>
+          
+          <div class="editor-scroll-container">
+            <!-- Dedicated parallel scrolling column for line numbers -->
+            <div class="line-numbers-gutter" id="line-numbers-gutter">
+              <span class="line-number-node">1</span>
+            </div>
+            
+            <textarea id="editor-textarea" class="editor-textarea" spellcheck="false" placeholder="Start writing markdown here..." title="Markdown Editor Input"></textarea>
+          </div>
+        </section>
+
+        <!-- Vertical Drag Handle -->
+        <div class="pane-resizer" id="pane-resizer" title="Drag to resize editor split"></div>
+
+        <!-- Right Pane: Preview -->
+        <section class="preview-pane" id="preview-pane">
+          <div class="pane-header">
+            <h3 class="pane-title">Preview</h3>
+          </div>
+          
+          <div class="preview-content" id="preview-content">
+            <!-- Real-time rendered HTML output -->
+          </div>
+        </section>
+
+      </main>
+
+    </div>
+
+  </div>
+
+  <!-- Sleek Floating Toast Notifications -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Help & Cheat Sheet Modal -->
+  <div class="modal-overlay" id="modal-help">
+    <div class="modal-container glass-panel">
+      <div class="modal-header">
+        <h3 class="modal-title">Markdown Formatting Cheat Sheet</h3>
+        <button class="modal-close-btn" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="help-grid">
+          <div class="help-item">
+            <span class="help-label">Header 1</span>
+            <span class="help-val"># Heading Title</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Header 2</span>
+            <span class="help-val">## Sub Heading</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Bold Text</span>
+            <span class="help-val">**strong text**</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Italic Text</span>
+            <span class="help-val">*emphasized text*</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Unordered List</span>
+            <span class="help-val">* List item</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Ordered List</span>
+            <span class="help-val">1. First item</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Inline Code</span>
+            <span class="help-val">`code line`</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Block Quote</span>
+            <span class="help-val">> Text quote</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Anchor Link</span>
+            <span class="help-val">[Text](URL)</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Code Block</span>
+            <span class="help-val">```js\ncode...\n```</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Dialog Input Modal (Premium alternative to prompt()) -->
+  <div class="modal-overlay" id="modal-prompt">
+    <div class="modal-container glass-panel" style="width: 400px; max-width: 95%;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="prompt-title">New Folder</h3>
+        <button class="modal-close-btn" id="prompt-close">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+        <input type="text" id="prompt-input" class="doc-name-input" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); width: 100%; border-radius: 8px;" placeholder="Enter name...">
+        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px;">
+          <button id="prompt-cancel-btn" class="btn">Cancel</button>
+          <button id="prompt-submit-btn" class="btn btn-primary">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Restore Session Floating Banner (Premium alternative to persistent force-opens) -->
+  <div class="restore-banner glass-panel" id="restore-banner">
+    <div class="restore-banner-content">
+      <span class="restore-banner-title">Continue where you left off?</span>
+      <span class="restore-banner-subtitle" id="restore-banner-path">Loading folder...</span>
+    </div>
+    <div class="restore-banner-actions">
+      <button id="btn-restore-session" class="btn btn-primary" style="padding: 6px 12px; font-size: 11px; font-family: 'Outfit', sans-serif;">Restore</button>
+      <button id="btn-dismiss-restore" class="restore-close-btn" title="Dismiss">&times;</button>
+    </div>
+  </div>
+
+  <!-- Load JS Engine Scripts -->
+  <script src="orbs.js"></script>
+  <script src="editor.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
