@@ -1,6 +1,6 @@
 {
   "name": "aether-editor",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "Zero-gravity Liquid Glass Markdown Editor & File Manager",
   "main": "main.js",
   "scripts": {
