@@ -21,6 +21,8 @@ class AetherApp {
     this.btnExportHtml = document.getElementById('btn-export-html');
     this.btnHelp = document.getElementById('btn-help');
     this.btnLineWrap = document.getElementById('btn-line-wrap');
+    this.btnInsertImage = document.getElementById('btn-insert-image');
+    this.imageFileInput = document.getElementById('image-file-input');
     this.btnThemeToggle = document.getElementById('btn-theme-toggle');
     this.btnSidebarView = document.getElementById('btn-sidebar-view');
     this.btnOpenWorkspace = document.getElementById('btn-open-workspace');
@@ -37,6 +39,11 @@ class AetherApp {
     
     this.modalHelp = document.getElementById('modal-help');
     this.modalClose = document.getElementById('modal-close');
+    this.modalLightbox = document.getElementById('modal-lightbox');
+    this.lightboxImg = document.getElementById('lightbox-img');
+    this.lightboxTitle = document.getElementById('lightbox-title');
+    this.lightboxClose = document.getElementById('lightbox-close');
+    this.lightboxCopyBtn = document.getElementById('lightbox-copy-btn');
     this.toastContainer = document.getElementById('toast-container');
     
     this.saveIndicator = document.getElementById('save-indicator');
@@ -44,6 +51,13 @@ class AetherApp {
     this.charCountNode = document.getElementById('char-count');
     this.workspacePanel = document.getElementById('main-workspace-panel');
     this.workspacePathDisplay = document.getElementById('workspace-path-display');
+    
+    // Floating bubble elements for referenced/dropped files
+    this.referencedFiles = [];
+    this.floatingDocBubble = document.getElementById('floating-doc-bubble');
+    this.floatingBubblePath = document.getElementById('floating-bubble-path');
+    this.btnBubbleReveal = document.getElementById('btn-bubble-reveal');
+    this.btnBubbleClose = document.getElementById('btn-bubble-close');
     
     // View Settings & Flags
     this.lineWrapEnabled = false;
@@ -55,76 +69,91 @@ class AetherApp {
     // Desktop Filesystem properties
     this.isDesktop = false;
     this.workspaceRootPath = '';
+    this.isPrimarySession = true;
 
     // Create debounced save function (300ms delay)
     this.debouncedSave = this.debounce(() => this.saveToStorage(), 300);
+    // Debounce heavy markdown preview compilation for large files (>50KB)
+    this.debouncedCompileLargePreview = this.debounce((content, docDir) => {
+      this.preview.innerHTML = this.compiler.compile(content, docDir);
+    }, 150);
 
     this.init();
   }
 
   async init() {
-    console.log("=== DIAGNOSTIC LOCALSTORAGE VALUES ===");
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      console.log(`  ${key}: ${localStorage.getItem(key)}`);
-    }
-    console.log("======================================");
-
-    // 1. Detect environment
+    // 1. Detect environment and apply immediate synchronous UI state BEFORE any async IPC awaits
     this.isDesktop = !!(window.aetherAPI && window.aetherAPI.isElectron());
-    
-    // Bind and show the version dynamically from package.json
-    if (this.isDesktop) {
-      try {
-        const appVer = await window.aetherAPI.getAppVersion();
-        const badge = document.querySelector('.logo-badge');
-        if (badge) badge.innerText = `V${appVer}`;
-      } catch (err) {
-        console.error("Failed to query app version", err);
-      }
+    const syncCfg = (this.isDesktop && window.aetherAPI.getSyncStartupConfig) ? window.aetherAPI.getSyncStartupConfig() : null;
+
+    if (syncCfg && syncCfg.appVersion) {
+      const badge = document.querySelector('.logo-badge');
+      if (badge) badge.innerText = `V${syncCfg.appVersion}`;
     }
+
+    // Apply Theme immediately on first tick (no flash, no IPC wait)
+    this.theme = (syncCfg && syncCfg.theme) || localStorage.getItem('aether_theme') || 'dark';
+    this.setTheme(this.theme, true);
+
+    // Apply Sidebar view layout immediately
+    this.sidebarLayoutMode = (syncCfg && syncCfg.sidebarLayout) || localStorage.getItem('aether_sidebar_layout') || 'stack';
+    this.updateSidebarViewButtonLabel();
+
+    // Apply Editor/Preview view mode split immediately
+    let savedLayoutMode = (syncCfg && syncCfg.layoutMode) || localStorage.getItem('aether_layout_mode') || 'split';
+    if (savedLayoutMode !== 'edit' && savedLayoutMode !== 'split' && savedLayoutMode !== 'read') {
+      savedLayoutMode = 'split';
+    }
+    this.setViewMode(savedLayoutMode, true);
 
     // Load autoRestore preference setting
     this.autoRestore = localStorage.getItem('aether_auto_restore') === 'true';
     this.updateAutoRestoreButtonLabel();
 
+    // Bind event listeners and resizer immediately so UI is responsive right away
+    this.setupEventListeners();
+    this.setupSplitResizer();
+    initScrollSync(this.textarea, this.preview, this.gutter);
+
     if (this.isDesktop) {
-      console.log("Aether: Native Desktop environment detected.");
-      // Hide standard export buttons in desktop mode since they write directly to folder
       if (this.btnExportMd) this.btnExportMd.style.display = 'none';
       if (this.btnExportHtml) this.btnExportHtml.style.display = 'none';
       if (this.btnOpenWorkspace) this.btnOpenWorkspace.style.display = 'inline-block';
 
-      // Load shared settings from disk
-      let sharedSettings = null;
-      let isPrimary = true;
+      // Fetch complete startup state in a single batched IPC call
+      let initState = null;
       try {
-        console.log("Aether: Fetching shared settings...");
-        sharedSettings = await window.aetherAPI.getSharedSettings();
-        console.log("Aether: Shared settings fetched:", JSON.stringify(sharedSettings));
-        
-        console.log("Aether: Fetching session lock status...");
-        isPrimary = await window.aetherAPI.isPrimarySession();
-        console.log("Aether: Session lock status:", isPrimary);
+        initState = await window.aetherAPI.getInitialState();
       } catch (err) {
-        console.error("Aether: Error loading shared settings / lock status:", err);
+        console.error("Aether: Error loading initial state:", err);
+      }
+
+      const sharedSettings = initState ? initState.sharedSettings : null;
+      const isPrimary = initState ? initState.isPrimary : true;
+      this.isPrimarySession = isPrimary;
+      this.defaultWorkspace = (initState && initState.defaultWorkspace) || await window.aetherAPI.getDefaultWorkspace();
+
+      if (initState && initState.appVersion) {
+        const badge = document.querySelector('.logo-badge');
+        if (badge) badge.innerText = `V${initState.appVersion}`;
       }
 
       if (sharedSettings) {
-        if (sharedSettings.theme) {
-          this.theme = sharedSettings.theme;
-          localStorage.setItem('aether_theme', this.theme);
+        if (sharedSettings.theme && sharedSettings.theme !== this.theme) {
+          this.setTheme(sharedSettings.theme, true);
         }
-        if (sharedSettings.sidebarLayout) {
+        if (sharedSettings.sidebarLayout && sharedSettings.sidebarLayout !== this.sidebarLayoutMode) {
           this.sidebarLayoutMode = sharedSettings.sidebarLayout;
           localStorage.setItem('aether_sidebar_layout', this.sidebarLayoutMode);
+          this.updateSidebarViewButtonLabel();
         }
-        if (sharedSettings.layoutMode) {
-          localStorage.setItem('aether_layout_mode', sharedSettings.layoutMode);
+        if (sharedSettings.layoutMode && sharedSettings.layoutMode !== this.currentMode) {
+          this.setViewMode(sharedSettings.layoutMode, true);
         }
         if (sharedSettings.autoRestore !== undefined) {
           this.autoRestore = sharedSettings.autoRestore;
           localStorage.setItem('aether_auto_restore', this.autoRestore ? 'true' : 'false');
+          this.updateAutoRestoreButtonLabel();
         }
         
         // Restore session path and document ONLY if this is the primary session
@@ -138,72 +167,100 @@ class AetherApp {
         }
       }
 
-      const defaultWorkspace = await window.aetherAPI.getDefaultWorkspace();
-      this.defaultWorkspace = defaultWorkspace;
-      // Secondary instances start fresh without restoring previous session
-      const lastWorkspace = isPrimary ? (localStorage.getItem('aether_workspace_path') || '') : '';
-      
-      const normDefault = this.normalizePath(defaultWorkspace);
-      const normLast = this.normalizePath(lastWorkspace);
-      
-      if (this.autoRestore && normLast && normLast !== normDefault) {
-        // Automatically restore previous custom workspace session
-        this.workspaceRootPath = lastWorkspace;
-        await this.loadWorkspaceFromDisk();
+      // Restore persisted referenced/dropped files in parallel (metadata first if huge, or concurrent read)
+      let persistedRefPaths = [];
+      try {
+        if (sharedSettings && Array.isArray(sharedSettings.referencedFiles)) {
+          persistedRefPaths = sharedSettings.referencedFiles;
+        } else {
+          const stored = localStorage.getItem('aether_referenced_files');
+          if (stored) persistedRefPaths = JSON.parse(stored);
+        }
+      } catch (e) {}
+
+      if (Array.isArray(persistedRefPaths) && persistedRefPaths.length > 0) {
+        const uniquePaths = [...new Set(persistedRefPaths.filter(Boolean))];
+        const refResults = await Promise.all(
+          uniquePaths.map(fullPath => window.aetherAPI.readFileAbsolute(fullPath).catch(() => null))
+        );
+        refResults.forEach((fileData) => {
+          if (fileData && fileData.fullPath) {
+            const b64Key = btoa(unescape(encodeURIComponent(fileData.fullPath))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+            this.referencedFiles.push({
+              id: 'ref_' + b64Key,
+              name: fileData.name,
+              fullPath: fileData.fullPath,
+              dirPath: fileData.dir,
+              content: fileData.content,
+              isExternal: true,
+              isFolder: false,
+              updatedAt: fileData.updatedAt
+            });
+          }
+        });
+      }
+
+      const launchFile = initState ? initState.launchFile : null;
+
+      if (launchFile && launchFile.filePath) {
+        this.workspaceRootPath = launchFile.dirPath;
+        this.targetStartupDoc = launchFile.fileName;
+        await this.loadWorkspaceFromDisk(true);
       } else {
-        // Always default to native documents directory on launch
-        this.workspaceRootPath = defaultWorkspace;
-        await this.loadWorkspaceFromDisk();
+        const lastWorkspace = isPrimary ? (localStorage.getItem('aether_workspace_path') || '') : '';
+        const normDefault = this.normalizePath(this.defaultWorkspace);
+        const normLast = this.normalizePath(lastWorkspace);
         
-        // If the user had opened a custom directory (and we are primary), prompt them to continue
-        if (isPrimary && normLast && normLast !== normDefault) {
-          this.showRestoreSessionBanner(lastWorkspace);
+        if (this.autoRestore && normLast && normLast !== normDefault) {
+          this.workspaceRootPath = lastWorkspace;
+          await this.loadWorkspaceFromDisk(true);
+        } else {
+          this.workspaceRootPath = this.defaultWorkspace;
+          await this.loadWorkspaceFromDisk(true);
+          
+          if (isPrimary && normLast && normLast !== normDefault) {
+            this.showRestoreSessionBanner(lastWorkspace);
+          }
         }
       }
     } else {
-      console.log("Aether: Web Browser environment detected (LocalStorage Fallback).");
       if (this.btnOpenWorkspace) this.btnOpenWorkspace.style.display = 'none';
-      
       this.loadDocuments();
-      this.checkVFSInitialization(); // Ensure system folders/guides are in place and regenerated
+      this.checkVFSInitialization();
       this.selectActiveDocumentOnStartup();
+      this.updateWorkspacePathDisplay();
+      this.renderFileList();
     }
-    
-    // 2. Restore Theme preference
-    this.theme = localStorage.getItem('aether_theme') || 'dark';
-    this.setTheme(this.theme);
+  }
 
-    // 3. Restore Sidebar view layout
-    this.sidebarLayoutMode = localStorage.getItem('aether_sidebar_layout') || 'stack';
-    this.updateSidebarViewButtonLabel();
-
-    // 4. Restore Editor/Preview view mode split
-    let savedLayoutMode = localStorage.getItem('aether_layout_mode') || 'split';
-    if (savedLayoutMode !== 'edit' && savedLayoutMode !== 'split' && savedLayoutMode !== 'read') {
-      savedLayoutMode = 'split';
+  // Open any disk folder as the active workspace
+  async openWorkspaceFolder(folderPath) {
+    if (!folderPath) return;
+    try {
+      this.currentDirPath = '/';
+      this.workspaceRootPath = folderPath;
+      localStorage.setItem('aether_workspace_path', folderPath);
+      await this.loadWorkspaceFromDisk(false);
+      await this.saveSharedSettings();
+      this.showToast(`Opened workspace: ${folderPath}`, "success");
+    } catch (err) {
+      console.error("Failed to open workspace folder:", err);
+      this.showToast("Failed to open workspace folder", "error");
     }
-    this.setViewMode(savedLayoutMode);
-
-    this.setupEventListeners();
-    this.setupSplitResizer();
-    
-    // Bind Scroll Sync
-    initScrollSync(this.textarea, this.preview, this.gutter);
-    
-    this.updateWorkspacePathDisplay();
-    this.renderFileList();
   }
 
   // Load files from physical disk
-  async loadWorkspaceFromDisk() {
+  async loadWorkspaceFromDisk(isSilentStartup = false) {
     try {
       this.currentDirPath = '/';
-      this.showToast(`Loading workspace: ${this.workspaceRootPath}`, "success");
+      if (!isSilentStartup) {
+        this.showToast(`Loading workspace: ${this.workspaceRootPath}`, "success");
+      }
       const list = await window.aetherAPI.readDirectory(this.workspaceRootPath);
       this.documents = list;
       
-      // Auto-regenerate guide templates inside /Guides on disk ONLY in default workspace
-      const defaultWorkspace = await window.aetherAPI.getDefaultWorkspace();
+      const defaultWorkspace = this.defaultWorkspace || await window.aetherAPI.getDefaultWorkspace();
+      this.defaultWorkspace = defaultWorkspace;
       const normDefault = this.normalizePath(defaultWorkspace);
       const normCurrent = this.normalizePath(this.workspaceRootPath);
       
@@ -220,10 +277,10 @@ class AetherApp {
       }
       
       if (normCurrent === normDefault) {
-        await this.checkDesktopVFSInitialization();
+        await this.checkDesktopVFSInitialization(false);
       }
       
-      this.selectActiveDocumentOnStartup();
+      await this.selectActiveDocumentOnStartup();
       this.renderFileList();
       this.updateWorkspacePathDisplay();
     } catch (err) {
@@ -232,15 +289,27 @@ class AetherApp {
     }
   }
 
-  // Overwrite/write default guides directly to hard drive
-  async checkDesktopVFSInitialization() {
+  // Provision default guides on disk only when missing or explicitly refreshed
+  async checkDesktopVFSInitialization(forceOverwrite = false) {
     let modified = false;
+
+    // 0. Ensure starter assets are available in default workspace
+    if (window.aetherAPI && window.aetherAPI.copyDefaultAssets) {
+      await window.aetherAPI.copyDefaultAssets(this.workspaceRootPath);
+    }
 
     // 1. Check folder /Guides
     let guidesFolder = this.documents.find(d => d.isFolder && d.path === '/' && d.name === 'Guides');
     if (!guidesFolder) {
       await window.aetherAPI.createFolder('/', 'Guides');
       modified = true;
+    }
+
+    const hasWelcome = this.documents.some(d => !d.isFolder && d.path === '/Guides' && d.name.toLowerCase() === 'welcome_guide.md');
+    const hasFormatting = this.documents.some(d => !d.isFolder && d.path === '/Guides' && d.name.toLowerCase() === 'formatting_guide.md');
+
+    if (!forceOverwrite && !modified && hasWelcome && hasFormatting) {
+      return; // Already initialized, skip redundant disk writes & re-scans on every launch!
     }
 
     const welcomeContent = `# Welcome to Aether 🌌 (v1.5.3)
@@ -257,7 +326,13 @@ Toggle between navigation models using the **View Mode button** at the bottom of
 - **Fluid Stack View**: Shows files and folders in the current directory level. Click a folder to navigate down. Use the back arrow button to navigate up.
 - **Classic Tree View**: Displays a vertically expanding tree directory structure with foldout arrows.
 
-## 3. Help & Sandbox
+## 3. Rich Image Support 🖼️
+Aether supports full Markdown image rendering, clipboard screenshots, and drag-and-drop:
+- Paste screenshots directly from your clipboard with **Ctrl+V**!
+- Drag image files from your computer and drop them into the editor.
+- Click any image in the preview to zoom in with the **Lightbox** modal!
+
+## 4. Help & Sandbox
 - Default guides (\`welcome_guide.md\`, \`Formatting_Guide.md\`) are kept clean and read-only in this introductory workspace.
 - To write your own documents, click the **📂 Open** button in the sidebar and select any folder on your hard drive!
 `;
@@ -287,6 +362,29 @@ function calculateOrbs() {
   return 5;
 }
 \`\`\`
+
+## Images 🖼️
+Aether includes complete image support with responsive layout, liquid glass borders, and interactive lightbox zoom.
+
+### Remote Images
+![Liquid Atmosphere](https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80 "Liquid Atmosphere Art")
+
+### Image Resizing
+Resize images with \`![Alt|WidthxHeight](url)\` or \`![Alt|Width](url)\`:
+![Resized Tech Visual|420](https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80 "Retro Tech Art")
+
+### Local Workspace Images
+Reference images relative to your document on disk:
+\`\`\`markdown
+![Aether Logo](../assets/logo.png)
+\`\`\`
+![Aether Logo|260](../assets/logo.png "Aether Logo")
+
+### Interactive Features
+- **Click to Zoom**: Click any image in the preview pane to open the high-res Lightbox modal.
+- **Clipboard Paste**: Paste screenshots directly from your clipboard (**Ctrl+V**).
+- **Drag & Drop**: Drag image files from Windows Explorer right into the editor.
+- **Insert Button**: Click **🖼️ Image** in the header or press **Ctrl+Shift+I**.
 `;
 
     // 2. Overwrite/save welcome_guide.md on startup
@@ -299,24 +397,44 @@ function calculateOrbs() {
     this.documents = list;
   }
 
-  selectActiveDocumentOnStartup() {
+  async selectActiveDocumentOnStartup() {
     const activeId = localStorage.getItem('aether_active_doc_id');
     const filesOnly = this.documents.filter(d => !d.isFolder);
-    const docToSelect = filesOnly.find(d => d.id === activeId) || 
-                        filesOnly.find(d => d.name === 'welcome_guide.md') || 
-                        filesOnly[0];
+    let docToSelect = null;
+    if (this.targetStartupDoc) {
+      docToSelect = filesOnly.find(d => d.name.toLowerCase() === this.targetStartupDoc.toLowerCase());
+      this.targetStartupDoc = null;
+    }
+    if (!docToSelect) {
+      docToSelect = (this.referencedFiles && this.referencedFiles.find(d => d.id === activeId)) ||
+                    filesOnly.find(d => d.id === activeId) || 
+                    filesOnly.find(d => d.name === 'welcome_guide.md') || 
+                    filesOnly[0] ||
+                    (this.referencedFiles && this.referencedFiles[0]);
+    }
     if (docToSelect) {
-      if (docToSelect.path !== '/') {
+      if (docToSelect.path && docToSelect.path !== '/') {
         this.currentDirPath = docToSelect.path;
       }
-      this.selectDocument(docToSelect.id);
+      await this.selectDocument(docToSelect.id);
     } else {
+      const normDefault = this.normalizePath(this.defaultWorkspace || '');
+      const normCurrent = this.normalizePath(this.workspaceRootPath || '');
+      const isDefault = this.isDesktop && (normCurrent === normDefault);
+
+      if (!isDefault && this.isDesktop) {
+        // Automatically create a new untitled document so user can immediately write in new folder
+        await this.createNewDocument();
+        return;
+      }
+
       this.activeDocId = null;
       this.textarea.value = '';
       this.docNameInput.value = '';
       this.preview.innerHTML = '';
       this.textarea.readOnly = true;
       this.docNameInput.disabled = true;
+      this.updateFloatingDocBubble(null);
       this.updateCounts();
       updateLineNumbers(this.textarea, this.gutter);
     }
@@ -371,7 +489,13 @@ Toggle between navigation models using the **View Mode button** at the bottom of
 - **Fluid Stack View**: Shows files and folders in the current directory level. Click a folder to navigate down. Use the back arrow button to navigate up.
 - **Classic Tree View**: Displays a vertically expanding tree directory structure with foldout arrows.
 
-## 3. Help & Sandbox
+## 3. Rich Image Support 🖼️
+Aether supports full Markdown image rendering, clipboard screenshots, and drag-and-drop:
+- Paste screenshots directly from your clipboard with **Ctrl+V**!
+- Drag image files from your computer and drop them into the editor.
+- Click any image in the preview to zoom in with the **Lightbox** modal!
+
+## 4. Help & Sandbox
 - Default guides (\`welcome_guide.md\`, \`Formatting_Guide.md\`) are kept clean and read-only in this introductory workspace.
 - To write your own documents, click the **📂 Open** button in the sidebar and select any folder on your hard drive!
 `;
@@ -401,6 +525,29 @@ function calculateOrbs() {
   return 5;
 }
 \`\`\`
+
+## Images 🖼️
+Aether includes complete image support with responsive layout, liquid glass borders, and interactive lightbox zoom.
+
+### Remote Images
+![Liquid Atmosphere](https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80 "Liquid Atmosphere Art")
+
+### Image Resizing
+Resize images with \`![Alt|WidthxHeight](url)\` or \`![Alt|Width](url)\`:
+![Resized Tech Visual|420](https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80 "Retro Tech Art")
+
+### Local Workspace Images
+Reference images relative to your document on disk:
+\`\`\`markdown
+![Aether Logo](../assets/logo.png)
+\`\`\`
+![Aether Logo|260](../assets/logo.png "Aether Logo")
+
+### Interactive Features
+- **Click to Zoom**: Click any image in the preview pane to open the high-res Lightbox modal.
+- **Clipboard Paste**: Paste screenshots directly from your clipboard (**Ctrl+V**).
+- **Drag & Drop**: Drag image files from Windows Explorer right into the editor.
+- **Insert Button**: Click **🖼️ Image** in the header or press **Ctrl+Shift+I**.
 `;
 
     // 2. Overwrite / regenerate welcome_guide.md on startup
@@ -495,7 +642,7 @@ function calculateOrbs() {
       const isDefault = this.isDesktop && (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
       if (isDefault) return;
 
-      const doc = this.documents.find(d => d.id === this.activeDocId);
+      const doc = this.documents.find(d => d.id === this.activeDocId) || this.referencedFiles.find(d => d.id === this.activeDocId);
       if (!doc) return;
 
       let name = this.docNameInput.value.trim();
@@ -524,6 +671,35 @@ function calculateOrbs() {
 
       if (this.isDesktop) {
         this.updateStateIndicator('Syncing...');
+
+        if (doc.isExternal && doc.fullPath) {
+          const oldFullPath = doc.fullPath;
+          const dir = doc.dirPath || '';
+          const newFullPath = (dir.endsWith('\\') || dir.endsWith('/')) ? dir + name : dir + '\\' + name;
+          const success = await window.aetherAPI.renamePathAbsolute(oldFullPath, newFullPath);
+          if (!success) {
+            this.showToast("Failed to rename file on disk", "error");
+            doc.name = oldName;
+            this.docNameInput.value = oldName;
+            this.updateStateIndicator('Saved');
+            return;
+          }
+
+          doc.name = name;
+          doc.fullPath = newFullPath;
+          const newKey = btoa(unescape(encodeURIComponent(newFullPath))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+          doc.id = 'ref_' + newKey;
+          this.activeDocId = doc.id;
+          localStorage.setItem('aether_active_doc_id', doc.id);
+          this.savePersistedReferencedFiles();
+          await this.saveSharedSettings();
+          this.updateFloatingDocBubble(doc);
+          this.renderFileList();
+          this.showToast(`Renamed to ${name}`, "success");
+          this.updateStateIndicator('Saved');
+          return;
+        }
+
         const success = await window.aetherAPI.renamePath(doc.path, oldName, name, false);
         if (!success) {
           this.showToast("Failed to rename file on disk", "error");
@@ -576,9 +752,7 @@ function calculateOrbs() {
       this.btnOpenWorkspace.addEventListener('click', async () => {
         const folder = await window.aetherAPI.selectDirectory();
         if (folder) {
-          this.workspaceRootPath = folder;
-          localStorage.setItem('aether_workspace_path', folder);
-          await this.loadWorkspaceFromDisk();
+          await this.openWorkspaceFolder(folder);
         }
       });
     }
@@ -682,14 +856,16 @@ function calculateOrbs() {
     // Home Guides reset event listener
     if (this.btnHomeWorkspace) {
       this.btnHomeWorkspace.addEventListener('click', async () => {
-        const defaultWorkspace = await window.aetherAPI.getDefaultWorkspace();
+        const defaultWorkspace = this.defaultWorkspace || await window.aetherAPI.getDefaultWorkspace();
+        this.defaultWorkspace = defaultWorkspace;
         this.workspaceRootPath = defaultWorkspace;
         localStorage.setItem('aether_workspace_path', defaultWorkspace);
         // Hide restore banner if active
         const banner = document.getElementById('restore-banner');
         if (banner) banner.classList.remove('active');
         
-        await this.loadWorkspaceFromDisk();
+        await this.checkDesktopVFSInitialization(true);
+        await this.loadWorkspaceFromDisk(true);
         this.showToast("Returned to Guides Workspace", "success");
       });
     }
@@ -707,7 +883,14 @@ function calculateOrbs() {
 
     // Global Ctrl+A event listener to restrict selection to text box
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      if (e.key === 'Escape') {
+        if (this.modalLightbox && this.modalLightbox.classList.contains('active')) {
+          this.closeImageLightbox();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i')) {
+        e.preventDefault();
+        this.handleInsertImageAction();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         const activeEl = document.activeElement;
         if (activeEl && (activeEl.id === 'doc-name-input' || activeEl.id === 'search-input' || activeEl.id === 'prompt-input')) {
           return;
@@ -717,6 +900,157 @@ function calculateOrbs() {
         this.textarea.select();
       }
     });
+
+    // Image Insert Button & File Input Triggers
+    if (this.btnInsertImage) {
+      this.btnInsertImage.addEventListener('click', () => {
+        this.handleInsertImageAction();
+      });
+    }
+
+    if (this.imageFileInput) {
+      this.imageFileInput.addEventListener('change', () => {
+        const file = this.imageFileInput.files && this.imageFileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const altText = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+          this.insertTextAtCursor(`\n![${altText}](${reader.result})\n`);
+          this.showToast(`Inserted ${file.name}`, "success");
+        };
+        reader.readAsDataURL(file);
+        this.imageFileInput.value = '';
+      });
+    }
+
+    // Clipboard Paste Listener for Images (Ctrl+V)
+    this.textarea.addEventListener('paste', async (e) => {
+      if (!e.clipboardData || !e.clipboardData.items) return;
+      const items = Array.from(e.clipboardData.items);
+      const imageItem = items.find(item => item.type && item.type.startsWith('image/'));
+      if (imageItem) {
+        e.preventDefault();
+        const file = imageItem.getAsFile();
+        if (!file) return;
+
+        const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `image_${timestamp}.${ext}`;
+
+        if (this.isDesktop && window.aetherAPI && window.aetherAPI.saveImageBuffer) {
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const base64Data = reader.result.split(',')[1];
+            const activeDoc = this.documents.find(d => d.id === this.activeDocId);
+            const docFolder = (activeDoc && activeDoc.path) ? activeDoc.path : '/';
+            const targetRelFolder = docFolder === '/' ? 'assets' : `${docFolder.replace(/^\//, '')}/assets`;
+
+            const savedRel = await window.aetherAPI.saveImageBuffer(targetRelFolder, filename, base64Data);
+            if (savedRel) {
+              this.insertTextAtCursor(`\n![Pasted Image](${targetRelFolder}/${filename})\n`);
+              this.showToast("Image pasted & saved to assets", "success");
+            } else {
+              this.showToast("Failed to save pasted image", "error");
+            }
+          };
+          reader.readAsDataURL(file);
+        } else {
+          const reader = new FileReader();
+          reader.onload = () => {
+            this.insertTextAtCursor(`\n![Pasted Image](${reader.result})\n`);
+            this.showToast("Image pasted as Data URL", "success");
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    });
+
+    // Global and Workspace Drag-and-Drop Handlers (Drop in files, drop in text, drop in folders)
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      if (this.workspacePanel) this.workspacePanel.classList.add('image-drag-active');
+    };
+
+    const handleDragLeave = (e) => {
+      if (!e.relatedTarget || e.relatedTarget === document.documentElement) {
+        if (this.workspacePanel) this.workspacePanel.classList.remove('image-drag-active');
+      }
+    };
+
+    const handleDrop = async (e) => {
+      e.preventDefault();
+      if (this.workspacePanel) this.workspacePanel.classList.remove('image-drag-active');
+
+      const hasFiles = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0;
+      if (hasFiles) {
+        const files = Array.from(e.dataTransfer.files);
+        for (const file of files) {
+          await this.handleDroppedFile(file, e.target);
+        }
+      } else if (e.dataTransfer) {
+        // Dropped text snippet
+        const textData = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/markdown');
+        if (textData) {
+          this.handleDroppedText(textData, e.target);
+        }
+      }
+    };
+
+    document.addEventListener('dragover', handleDragOver);
+    document.addEventListener('dragleave', handleDragLeave);
+    document.addEventListener('drop', handleDrop);
+
+    // Floating Doc Bubble Actions
+    if (this.btnBubbleReveal) {
+      this.btnBubbleReveal.addEventListener('click', () => {
+        const doc = this.referencedFiles.find(d => d.id === this.activeDocId);
+        if (doc && doc.fullPath && window.aetherAPI) {
+          window.aetherAPI.openInExplorer(doc.fullPath);
+        }
+      });
+    }
+
+    if (this.btnBubbleClose) {
+      this.btnBubbleClose.addEventListener('click', () => {
+        if (this.activeDocId) {
+          this.closeReferencedFile(this.activeDocId);
+        }
+      });
+    }
+
+    // Preview Image Click -> Lightbox Zoom Modal
+    if (this.preview) {
+      this.preview.addEventListener('click', (e) => {
+        if (e.target && e.target.tagName === 'IMG' && !e.target.closest('a') && !e.target.classList.contains('img-broken')) {
+          this.openImageLightbox(e.target.src, e.target.alt, e.target.title);
+        }
+      });
+    }
+
+    // Lightbox Controls
+    if (this.lightboxClose) {
+      this.lightboxClose.addEventListener('click', () => this.closeImageLightbox());
+    }
+
+    if (this.modalLightbox) {
+      this.modalLightbox.addEventListener('click', (e) => {
+        if (e.target === this.modalLightbox) {
+          this.closeImageLightbox();
+        }
+      });
+    }
+
+    if (this.lightboxCopyBtn) {
+      this.lightboxCopyBtn.addEventListener('click', () => {
+        if (!this.lightboxImg || !this.lightboxImg.src) return;
+        navigator.clipboard.writeText(this.lightboxImg.src).then(() => {
+          this.showToast("Image link copied to clipboard", "success");
+        });
+      });
+    }
   }
 
   // Setup Split resizer draggable line listener
@@ -761,31 +1095,39 @@ function calculateOrbs() {
   }
 
   // Set Theme colors and attribute properties
-  setTheme(theme) {
+  setTheme(theme, skipSave = false) {
     this.theme = theme;
     localStorage.setItem('aether_theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
     
-    if (theme === 'dark') {
-      this.btnThemeToggle.innerHTML = '🌓 Theme: Dark';
-    } else {
-      this.btnThemeToggle.innerHTML = '🌓 Theme: Light';
+    if (this.btnThemeToggle) {
+      if (theme === 'dark') {
+        this.btnThemeToggle.innerHTML = '🌓 Theme: Dark';
+      } else {
+        this.btnThemeToggle.innerHTML = '🌓 Theme: Light';
+      }
     }
-    this.saveSharedSettings();
+    if (!skipSave) {
+      this.saveSharedSettings();
+    }
   }
 
   updateSidebarViewButtonLabel() {
-    this.btnSidebarView.innerHTML = this.sidebarLayoutMode === 'stack' ? 'View: Stack' : 'View: Tree';
+    if (this.btnSidebarView) {
+      this.btnSidebarView.innerHTML = this.sidebarLayoutMode === 'stack' ? 'View: Stack' : 'View: Tree';
+    }
   }
 
   // Update layout mode
-  setViewMode(mode) {
+  setViewMode(mode, skipSave = false) {
     this.currentMode = mode;
     localStorage.setItem('aether_layout_mode', mode);
     
     // Reset layout classes
-    this.workspacePanel.classList.remove('mode-edit', 'mode-split', 'mode-read');
-    this.workspacePanel.classList.add(`mode-${mode}`);
+    if (this.workspacePanel) {
+      this.workspacePanel.classList.remove('mode-edit', 'mode-split', 'mode-read');
+      this.workspacePanel.classList.add(`mode-${mode}`);
+    }
     
     // Toggle active styling
     if (this.btnModeEdit) this.btnModeEdit.classList.toggle('active', mode === 'edit');
@@ -794,20 +1136,290 @@ function calculateOrbs() {
     
     // Recalculate scroll gutter
     updateLineNumbers(this.textarea, this.gutter);
-    this.saveSharedSettings();
+    if (!skipSave) {
+      this.saveSharedSettings();
+    }
+  }
+
+  // Get absolute directory path of the active document on disk
+  getCurrentDocumentDirectory() {
+    if (!this.isDesktop || !this.workspaceRootPath) return '';
+    const doc = this.documents.find(d => d.id === this.activeDocId);
+    if (!doc) return this.workspaceRootPath;
+
+    const docRelDir = (doc.path || '/').replace(/^\//, '');
+    if (!docRelDir) return this.workspaceRootPath;
+    return `${this.workspaceRootPath.replace(/\\/g, '/')}/${docRelDir}`.replace(/\/+/g, '/');
+  }
+
+  // Insert markdown text at editor cursor position
+  insertTextAtCursor(textToInsert) {
+    const start = this.textarea.selectionStart;
+    const end = this.textarea.selectionEnd;
+    const currentVal = this.textarea.value;
+
+    const newVal = currentVal.substring(0, start) + textToInsert + currentVal.substring(end);
+    this.textarea.value = newVal;
+
+    const newCursorPos = start + textToInsert.length;
+    this.textarea.selectionStart = this.textarea.selectionEnd = newCursorPos;
+    this.textarea.focus();
+
+    this.updateActiveDocumentContent();
+    this.updateCounts();
+    this.updateStateIndicator('Syncing...');
+    this.debouncedSave();
+  }
+
+  // Open Lightbox image zoom modal
+  openImageLightbox(src, alt = '', title = '') {
+    if (!this.modalLightbox || !this.lightboxImg) return;
+    this.lightboxImg.src = src;
+    this.lightboxImg.alt = alt || 'Preview';
+    if (this.lightboxTitle) {
+      this.lightboxTitle.innerText = title || alt || 'Image Preview';
+    }
+    this.modalLightbox.classList.add('active');
+  }
+
+  // Close Lightbox image zoom modal
+  closeImageLightbox() {
+    if (!this.modalLightbox) return;
+    this.modalLightbox.classList.remove('active');
+    if (this.lightboxImg) {
+      this.lightboxImg.src = '';
+    }
+  }
+
+  // Handle Image Insert Toolbar Action
+  async handleInsertImageAction() {
+    const isDefault = this.isDesktop && (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
+    if (isDefault) {
+      this.showToast("Default guide documents are read-only. Open your own folder to edit!", "info");
+      return;
+    }
+
+    if (this.isDesktop && window.aetherAPI && window.aetherAPI.selectImage) {
+      const filePath = await window.aetherAPI.selectImage();
+      if (filePath) {
+        const fileName = filePath.split(/[/\\]/).pop();
+        const normWs = this.normalizePath(this.workspaceRootPath);
+        const normFile = this.normalizePath(filePath);
+
+        let imgMarkdownPath = '';
+        if (normFile.startsWith(normWs)) {
+          const activeDoc = this.documents.find(d => d.id === this.activeDocId);
+          const docRelPath = activeDoc ? activeDoc.path : '/';
+          const rel = await window.aetherAPI.getRelativeImagePath(filePath, docRelPath);
+          imgMarkdownPath = rel || fileName;
+        } else {
+          const activeDoc = this.documents.find(d => d.id === this.activeDocId);
+          const docFolder = (activeDoc && activeDoc.path) ? activeDoc.path : '/';
+          const targetSubdir = docFolder === '/' ? 'assets' : `${docFolder.replace(/^\//, '')}/assets`;
+          const savedRel = await window.aetherAPI.importImageFile(filePath, targetSubdir);
+          imgMarkdownPath = savedRel || fileName;
+        }
+
+        const altText = fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+        this.insertTextAtCursor(`\n![${altText}](${imgMarkdownPath})\n`);
+        this.showToast(`Inserted ${fileName}`, "success");
+      } else {
+        const url = await this.showPrompt("Insert Image URL", "https://example.com/image.png");
+        if (url && url.trim()) {
+          this.insertTextAtCursor(`\n![Image](${url.trim()})\n`);
+          this.showToast("Image URL inserted", "success");
+        }
+      }
+    } else {
+      const url = await this.showPrompt("Insert Image", "Enter image URL (https://...) or leave blank to browse file");
+      if (url && url.trim()) {
+        this.insertTextAtCursor(`\n![Image](${url.trim()})\n`);
+        this.showToast("Image URL inserted", "success");
+      } else if (this.imageFileInput) {
+        this.imageFileInput.click();
+      }
+    }
   }
 
   // Update in-memory copy content
   updateActiveDocumentContent() {
     if (!this.activeDocId) return;
-    const doc = this.documents.find(d => d.id === this.activeDocId);
+    const doc = this.documents.find(d => d.id === this.activeDocId) || (this.referencedFiles && this.referencedFiles.find(d => d.id === this.activeDocId));
     if (doc) {
       doc.content = this.textarea.value;
       doc.updatedAt = new Date().toISOString();
-      
-      this.preview.innerHTML = this.compiler.compile(doc.content);
+      const docDir = doc.isExternal ? (doc.dirPath || '') : this.getCurrentDocumentDirectory();
+      // For large documents (>40KB), debounce preview compilation so typing stays 60fps
+      if (doc.content.length > 40000) {
+        this.debouncedCompileLargePreview(doc.content, docDir);
+      } else {
+        this.preview.innerHTML = this.compiler.compile(doc.content, docDir);
+      }
       updateLineNumbers(this.textarea, this.gutter);
     }
+  }
+
+  updateFloatingDocBubble(doc) {
+    if (!this.floatingDocBubble || !this.floatingBubblePath) return;
+
+    if (doc && doc.isExternal && doc.fullPath) {
+      this.floatingBubblePath.innerText = doc.fullPath;
+      this.floatingBubblePath.title = doc.fullPath;
+      this.floatingDocBubble.style.display = 'flex';
+    } else {
+      this.floatingDocBubble.style.display = 'none';
+    }
+  }
+
+  closeReferencedFile(id) {
+    const idx = this.referencedFiles.findIndex(f => f.id === id);
+    if (idx === -1) return;
+    const closedDoc = this.referencedFiles[idx];
+    this.referencedFiles.splice(idx, 1);
+    this.savePersistedReferencedFiles();
+    this.saveSharedSettings();
+
+    if (this.activeDocId === id) {
+      const nextDoc = this.referencedFiles[0] || this.documents.filter(d => !d.isFolder)[0];
+      if (nextDoc) {
+        this.selectDocument(nextDoc.id);
+      } else {
+        this.activeDocId = null;
+        this.textarea.value = '';
+        this.docNameInput.value = '';
+        this.preview.innerHTML = '';
+        this.updateFloatingDocBubble(null);
+        this.updateCounts();
+        updateLineNumbers(this.textarea, this.gutter);
+      }
+    }
+    this.renderFileList();
+    this.showToast(`Unreferenced ${closedDoc.name}`, "info");
+  }
+
+  handleDroppedText(text, target) {
+    if (!text) return;
+    if (this.textarea.readOnly) {
+      this.createNewDocument().then(() => {
+        this.insertTextAtCursor(text);
+        this.showToast("Dropped text into new document", "success");
+      });
+      return;
+    }
+    this.insertTextAtCursor(text);
+    this.updateActiveDocumentContent();
+    this.updateCounts();
+    this.updateStateIndicator('Syncing...');
+    this.debouncedSave();
+    this.showToast("Text dropped in!", "success");
+  }
+
+  async handleDroppedFile(file, target) {
+    const filePath = (window.aetherAPI && window.aetherAPI.getPathForFile)
+      ? window.aetherAPI.getPathForFile(file)
+      : (file.path || '');
+
+    if (!this.isDesktop || !filePath) {
+      if (file.type && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const altText = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+          this.insertTextAtCursor(`\n![${altText}](${reader.result})\n`);
+          this.showToast(`Inserted ${file.name}`, "success");
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const refDoc = {
+          id: 'ref_' + Date.now(),
+          name: file.name,
+          fullPath: file.name,
+          dirPath: 'Referenced',
+          content: ev.target.result,
+          isExternal: true,
+          isFolder: false,
+          updatedAt: new Date().toISOString()
+        };
+        this.referencedFiles.push(refDoc);
+        this.selectDocument(refDoc.id);
+        this.renderFileList();
+        this.showToast(`Referenced ${file.name}`, "success");
+      };
+      reader.readAsText(file);
+      return;
+    }
+
+    const info = await window.aetherAPI.inspectPath(filePath);
+    if (!info) return;
+
+    if (info.isDirectory) {
+      // Dropping in a folder opens it as workspace!
+      await this.openWorkspaceFolder(filePath);
+      return;
+    }
+
+    // Check if image AND dropped directly on editor or preview
+    const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(info.name);
+    const droppedOnEditorOrPreview = target && (this.textarea.contains(target) || this.preview.contains(target));
+
+    if (isImage && droppedOnEditorOrPreview) {
+      const fileName = info.name;
+      const normWs = this.normalizePath(this.workspaceRootPath);
+      const normFile = this.normalizePath(filePath);
+      let imgPath = '';
+
+      if (normFile.startsWith(normWs)) {
+        const activeDoc = this.documents.find(d => d.id === this.activeDocId) || (this.referencedFiles && this.referencedFiles.find(d => d.id === this.activeDocId));
+        const docRelPath = (activeDoc && !activeDoc.isExternal) ? activeDoc.path : '/';
+        const rel = await window.aetherAPI.getRelativeImagePath(filePath, docRelPath);
+        imgPath = rel || fileName;
+      } else {
+        const activeDoc = this.documents.find(d => d.id === this.activeDocId);
+        const docFolder = (activeDoc && activeDoc.path) ? activeDoc.path : '/';
+        const targetSubdir = docFolder === '/' ? 'assets' : `${docFolder.replace(/^\//, '')}/assets`;
+        const imported = await window.aetherAPI.importImageFile(filePath, targetSubdir);
+        imgPath = imported || fileName;
+      }
+
+      const altText = fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+      this.insertTextAtCursor(`\n![${altText}](${imgPath})\n`);
+      this.showToast(`Inserted ${fileName}`, "success");
+      return;
+    }
+
+    // Dropped file for editing: does not move its location to active folder, references it!
+    const fileData = await window.aetherAPI.readFileAbsolute(filePath);
+    if (!fileData) {
+      this.showToast(`Failed to open ${info.name}`, "error");
+      return;
+    }
+
+    let existing = this.referencedFiles.find(f => this.normalizePath(f.fullPath) === this.normalizePath(filePath));
+    if (!existing) {
+      const b64Key = btoa(unescape(encodeURIComponent(filePath))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+      existing = {
+        id: 'ref_' + b64Key,
+        name: info.name,
+        fullPath: filePath,
+        dirPath: info.dir,
+        content: fileData.content,
+        isExternal: true,
+        isFolder: false,
+        updatedAt: fileData.updatedAt || new Date().toISOString()
+      };
+      this.referencedFiles.push(existing);
+      this.savePersistedReferencedFiles();
+      await this.saveSharedSettings();
+    } else {
+      existing.content = fileData.content;
+      existing.updatedAt = fileData.updatedAt;
+    }
+
+    this.selectDocument(existing.id);
+    this.renderFileList();
+    this.showToast(`Referenced file: ${info.name}`, "success");
   }
 
   updateCounts() {
@@ -839,10 +1451,16 @@ function calculateOrbs() {
 
       if (this.isDesktop) {
         if (docId) {
-          const doc = this.documents.find(d => d.id === docId);
+          const doc = this.documents.find(d => d.id === docId) || (this.referencedFiles && this.referencedFiles.find(d => d.id === docId));
           if (doc && !doc.isFolder) {
-            // Write file directly to disk folder
-            const success = await window.aetherAPI.saveFile(doc.path, doc.name, content);
+            let success = false;
+            if (doc.isExternal && doc.fullPath) {
+              // Write directly to referenced file path on disk
+              success = await window.aetherAPI.saveFileAbsolute(doc.fullPath, content);
+            } else {
+              // Write to workspace directory
+              success = await window.aetherAPI.saveFile(doc.path, doc.name, content);
+            }
             if (!success) {
               throw new Error("Failed to write file to disk");
             }
@@ -854,7 +1472,7 @@ function calculateOrbs() {
       } else {
         // Web fallback: update in-memory content first
         if (docId) {
-          const doc = this.documents.find(d => d.id === docId);
+          const doc = this.documents.find(d => d.id === docId) || (this.referencedFiles && this.referencedFiles.find(d => d.id === docId));
           if (doc && !doc.isFolder) {
             doc.content = content;
             doc.updatedAt = new Date().toISOString();
@@ -878,24 +1496,26 @@ function calculateOrbs() {
     } catch (error) {
       console.error("VFS sync error:", error);
       this.updateStateIndicator('Sync Error');
-      this.showToast("Failed to save changes to disk folder", "error");
+      this.showToast("Failed to save changes to disk file", "error");
     }
   }
 
   async saveSharedSettings() {
-    if (!this.isDesktop) return;
+    if (!this.isDesktop || !window.aetherAPI || !window.aetherAPI.saveSharedSettings) return;
     try {
+      const isDefault = (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
+      const refPaths = this.referencedFiles ? this.referencedFiles.map(f => f.fullPath) : [];
       const settings = {
         theme: this.theme,
         sidebarLayout: this.sidebarLayoutMode,
-        layoutMode: this.currentMode,
-        autoRestore: this.autoRestore
+        layoutMode: this.currentMode || localStorage.getItem('aether_layout_mode') || 'split',
+        autoRestore: this.autoRestore,
+        referencedFiles: refPaths
       };
 
-      const isPrimary = await window.aetherAPI.isPrimarySession();
-      if (isPrimary) {
+      if (this.isPrimarySession) {
         settings.primarySession = {
-          workspacePath: this.workspaceRootPath,
+          workspacePath: isDefault ? '' : this.workspaceRootPath,
           activeDocId: this.activeDocId
         };
       }
@@ -903,6 +1523,13 @@ function calculateOrbs() {
     } catch (err) {
       console.error("Failed to save shared settings:", err);
     }
+  }
+
+  savePersistedReferencedFiles() {
+    try {
+      const paths = this.referencedFiles ? this.referencedFiles.map(f => f.fullPath) : [];
+      localStorage.setItem('aether_referenced_files', JSON.stringify(paths));
+    } catch (e) {}
   }
 
   updateStateIndicator(state) {
@@ -925,12 +1552,94 @@ function calculateOrbs() {
     }
   }
 
+  // Render Referenced / Dropped Files Nodes
+  renderReferencedFilesNodes() {
+    if (!this.referencedFiles || this.referencedFiles.length === 0) return null;
+
+    const query = this.searchInput.value.toLowerCase().trim();
+    const filteredRefs = query 
+      ? this.referencedFiles.filter(r => r.name.toLowerCase().includes(query))
+      : this.referencedFiles;
+
+    if (filteredRefs.length === 0) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'referenced-files-section';
+
+    filteredRefs.forEach(ref => {
+      const isSelected = ref.id === this.activeDocId;
+      const groupEl = document.createElement('div');
+      groupEl.className = 'referenced-file-group';
+      
+      const timeStr = ref.updatedAt ? new Date(ref.updatedAt).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric'
+      }) : 'Referenced';
+
+      groupEl.innerHTML = `
+        <div class="workspace-path-display referenced-path-bubble" title="Referenced location: ${this.escapeHTML(ref.fullPath)}">
+          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px;">
+              <span style="color: var(--accent-cyan); font-weight: 600;">Ref:</span> ${this.escapeHTML(ref.dirPath || ref.fullPath)}
+            </span>
+            <span style="font-size: 8.5px; opacity: 0.75; margin-left: 4px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">External</span>
+          </div>
+        </div>
+        <div class="file-item referenced-file-node ${isSelected ? 'active' : ''}">
+          <div class="file-item-left">
+            <svg class="file-icon" style="color: var(--accent-cyan);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <div class="file-info">
+              <span class="file-title" style="font-weight: 500;">${this.escapeHTML(ref.name)}</span>
+              <span class="file-date">${timeStr}</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 4px; align-items: center;">
+            <button class="btn-ref-explorer file-delete-btn" style="opacity: 1;" title="Show file in Explorer">
+              <svg style="width: 12px; height: 12px; color: #4caf50;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+              </svg>
+            </button>
+            <button class="btn-ref-close file-delete-btn" title="Close reference (keeps file on disk)">
+              <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+
+      groupEl.querySelector('.file-item-left').addEventListener('click', () => {
+        this.selectDocument(ref.id);
+      });
+      groupEl.querySelector('.btn-ref-explorer').addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.aetherAPI.openInExplorer(ref.fullPath);
+      });
+      groupEl.querySelector('.btn-ref-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.closeReferencedFile(ref.id);
+      });
+
+      wrapper.appendChild(groupEl);
+    });
+
+    return wrapper;
+  }
+
   // Fluid Stack View layout with programmatically bound listeners
   renderStackView() {
     const isDefault = this.isDesktop && (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
     this.sidebarNavHeader.style.display = 'flex';
     this.breadcrumbPath.innerText = this.currentDirPath === '/' ? 'Root' : `Root${this.currentDirPath.replace(/\//g, ' / ')}`;
     this.fileList.innerHTML = '';
+
+    // 1. Render Referenced / Dropped Files (each with floating bubble specifically above it)
+    const refSection = this.renderReferencedFilesNodes();
+    if (refSection) {
+      this.fileList.appendChild(refSection);
+    }
 
     const query = this.searchInput.value.toLowerCase().trim();
     const levelItems = this.documents.filter(d => d.path === this.currentDirPath);
@@ -947,7 +1656,14 @@ function calculateOrbs() {
     const sorted = [...folders, ...files];
 
     if (sorted.length === 0) {
-      this.fileList.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 16px;">No items in folder</div>`;
+      if (!refSection) {
+        this.fileList.innerHTML = `<div style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 16px;">No items in folder</div>`;
+      } else {
+        const emptyNotice = document.createElement('div');
+        emptyNotice.style.cssText = 'text-align: center; color: var(--text-muted); font-size: 11px; padding: 12px; font-style: italic;';
+        emptyNotice.innerText = 'No workspace items in this folder';
+        this.fileList.appendChild(emptyNotice);
+      }
       return;
     }
 
@@ -971,7 +1687,7 @@ function calculateOrbs() {
             </div>
           </div>
           <div style="display: flex; gap: 4px; align-items: center;">
-            <button class="btn-open-folder file-delete-btn" style="opacity: 1;" title="Open folder">
+            <button class="btn-open-folder file-delete-btn" style="opacity: 1;" title="Open as Workspace folder">
               <svg style="width: 14px; height: 14px; color: var(--accent-cyan);" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-8m-4-2l-2 2H4"></path>
               </svg>
@@ -989,13 +1705,17 @@ function calculateOrbs() {
           </div>
         `;
 
-        // Programmatic Event Listeners (prevents syntax quotes escape crashes)
+        // Programmatic Event Listeners
         node.querySelector('.file-item-left').addEventListener('click', () => {
           this.navigateIntoFolder(item.name);
         });
         node.querySelector('.btn-open-folder').addEventListener('click', (e) => {
           e.stopPropagation();
-          this.navigateIntoFolder(item.name);
+          const sep = (this.workspaceRootPath.endsWith('\\') || this.workspaceRootPath.endsWith('/')) ? '' : '\\';
+          const targetDir = item.path === '/' 
+            ? (this.workspaceRootPath + sep + item.name)
+            : (this.workspaceRootPath + item.path.replace(/\//g, '\\') + '\\' + item.name);
+          this.openWorkspaceFolder(targetDir);
         });
         if (this.isDesktop) {
           node.querySelector('.btn-explorer').addEventListener('click', (e) => {
@@ -1073,6 +1793,13 @@ function calculateOrbs() {
     }
 
     this.fileList.innerHTML = '';
+
+    // Render referenced files at top of Tree View as well
+    const refSection = this.renderReferencedFilesNodes();
+    if (refSection) {
+      this.fileList.appendChild(refSection);
+    }
+
     const treeRoot = this.renderTreeRecursive('/', 0);
     this.fileList.appendChild(treeRoot);
   }
@@ -1103,7 +1830,12 @@ function calculateOrbs() {
         <span class="tree-icon folder-item">📁</span>
         <span class="tree-label" style="font-weight: 500;">${this.escapeHTML(folder.name)}</span>
         <div style="display:flex; gap:2px; align-items:center;">
-          <button class="btn-tree-explorer file-delete-btn" style="padding: 2px 4px; border:none;" title="Show folder in Explorer">📂</button>
+          <button class="btn-tree-open file-delete-btn" style="padding: 2px 4px; border:none; opacity: 1;" title="Open as Workspace folder">
+            <svg style="width: 12px; height: 12px; color: var(--accent-cyan);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-8m-4-2l-2 2H4"></path></svg>
+          </button>
+          <button class="btn-tree-explorer file-delete-btn" style="padding: 2px 4px; border:none; opacity: 1;" title="Show folder in Explorer">
+            <svg style="width: 11px; height: 11px; color: #4caf50;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+          </button>
           <button class="btn-tree-delete file-delete-btn" style="padding: 2px 4px; border:none;" title="Delete directory">✕</button>
         </div>
       `;
@@ -1112,12 +1844,21 @@ function calculateOrbs() {
       rowEl.addEventListener('click', () => {
         this.toggleTreeFolder(folderFullPath);
       });
+      rowEl.querySelector('.btn-tree-open').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sep = (this.workspaceRootPath.endsWith('\\') || this.workspaceRootPath.endsWith('/')) ? '' : '\\';
+        const targetDir = folder.path === '/' 
+          ? (this.workspaceRootPath + sep + folder.name)
+          : (this.workspaceRootPath + folder.path.replace(/\//g, '\\') + '\\' + folder.name);
+        this.openWorkspaceFolder(targetDir);
+      });
       if (this.isDesktop) {
         rowEl.querySelector('.btn-tree-explorer').addEventListener('click', (e) => {
           e.stopPropagation();
           window.aetherAPI.openInExplorer(folder.path, folder.name);
         });
       } else {
+        rowEl.querySelector('.btn-tree-open').style.display = 'none';
         rowEl.querySelector('.btn-tree-explorer').style.display = 'none';
       }
       if (isDefault) {
@@ -1203,35 +1944,50 @@ function calculateOrbs() {
     this.renderFileList();
   }
 
-  // Load document context
-  selectDocument(id) {
+  // Load document context (supports lazy-loading large files on demand)
+  async selectDocument(id) {
     if (this.activeDocId && this.activeDocId !== id) {
       // Save current document immediately in the background before switching
       this.saveToStorage(this.activeDocId, this.textarea.value);
     }
 
-    const doc = this.documents.find(d => d.id === id);
+    const doc = this.documents.find(d => d.id === id) || (this.referencedFiles && this.referencedFiles.find(d => d.id === id));
     if (!doc || doc.isFolder) return;
 
     this.activeDocId = id;
+
+    // Lazy load content from disk if not yet loaded (files > 128KB)
+    if (doc.content === null && this.isDesktop && window.aetherAPI && window.aetherAPI.readFileRelative) {
+      this.updateStateIndicator('Loading...');
+      const loaded = await window.aetherAPI.readFileRelative(doc.path, doc.name);
+      doc.content = loaded !== null ? loaded : '';
+    }
     
     // Set text contents
-    this.textarea.value = doc.content;
+    this.textarea.value = doc.content || '';
     this.docNameInput.value = doc.name;
-    this.preview.innerHTML = this.compiler.compile(doc.content);
+    const docDir = doc.isExternal ? (doc.dirPath || '') : this.getCurrentDocumentDirectory();
+    this.preview.innerHTML = this.compiler.compile(this.textarea.value, docDir);
     
     this.updateCounts();
     updateLineNumbers(this.textarea, this.gutter);
     
     // Ensure editability
-    const isDefault = this.isDesktop && (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
+    const isDefault = !doc.isExternal && this.isDesktop && (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
     this.textarea.readOnly = isDefault;
     this.docNameInput.disabled = isDefault;
 
     const paneTitle = document.querySelector('#editor-pane .pane-title');
     if (paneTitle) {
-      paneTitle.innerText = isDefault ? 'Editor (Read-Only Guide)' : 'Editor';
+      if (doc.isExternal) {
+        paneTitle.innerText = 'Editor (Referenced File)';
+      } else {
+        paneTitle.innerText = isDefault ? 'Editor (Read-Only Guide)' : 'Editor';
+      }
     }
+
+    // Update Floating Bubble specifically above it
+    this.updateFloatingDocBubble(doc);
 
     this.renderFileList();
     localStorage.setItem('aether_active_doc_id', id);
@@ -1241,7 +1997,12 @@ function calculateOrbs() {
   async createNewDocument() {
     const id = 'doc_' + Date.now();
     const path = this.sidebarLayoutMode === 'stack' ? this.currentDirPath : '/';
-    const name = 'untitled.md';
+    let name = 'untitled.md';
+    let counter = 1;
+    while (this.documents.some(d => !d.isFolder && d.path === path && d.name.toLowerCase() === name.toLowerCase())) {
+      name = `untitled_${counter}.md`;
+      counter++;
+    }
     const content = '# Untitled Document\n\nStart writing markdown here...';
 
     if (this.isDesktop) {
@@ -1318,6 +2079,12 @@ function calculateOrbs() {
 
   // Deletion cascades that clean up child documents and nested structures
   async deleteDocument(id) {
+    const isRef = this.referencedFiles && this.referencedFiles.some(f => f.id === id);
+    if (isRef) {
+      this.closeReferencedFile(id);
+      return;
+    }
+
     const isDefault = this.isDesktop && (this.normalizePath(this.workspaceRootPath) === this.normalizePath(this.defaultWorkspace));
     if (isDefault) {
       this.showToast("Default Guide files cannot be deleted.", "error");
@@ -1378,7 +2145,7 @@ function calculateOrbs() {
 
   exportDocument(format) {
     if (!this.activeDocId) return;
-    const doc = this.documents.find(d => d.id === this.activeDocId);
+    const doc = this.documents.find(d => d.id === this.activeDocId) || (this.referencedFiles && this.referencedFiles.find(d => d.id === this.activeDocId));
     if (!doc) return;
 
     let blob, filename;
@@ -1420,10 +2187,16 @@ function calculateOrbs() {
       margin: 0;
       padding: 10px 20px;
     }
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
   </style>
 </head>
 <body>
-  ${this.compiler.compile(doc.content)}
+  ${this.compiler.compile(doc.content, this.getCurrentDocumentDirectory())}
 </body>
 </html>`;
       blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });

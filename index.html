@@ -8,6 +8,22 @@
   <title>Aether | Zero-Gravity Liquid Glass Markdown Editor</title>
   <meta name="description" content="A premium, zero-gravity workspace featuring a liquid glass styled Markdown editor and file manager over floating ambient gradients.">
   
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'">
+  
+  <!-- Synchronous pre-paint theme hydration (eliminates dark->light FOUC flash) -->
+  <script>
+    (function() {
+      try {
+        var syncCfg = (window.aetherAPI && window.aetherAPI.getSyncStartupConfig) ? window.aetherAPI.getSyncStartupConfig() : null;
+        var theme = (syncCfg && syncCfg.theme) || localStorage.getItem('aether_theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -43,9 +59,11 @@
         <span id="save-indicator" style="font-size: 11px; margin-right: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-cyan);">Saved</span>
         <button id="btn-theme-toggle" class="btn" title="Toggle Light/Dark theme">🌓 Theme: Dark</button>
         <button id="btn-line-wrap" class="btn" title="Toggle line wrapping inside the text editor">Wrap: OFF</button>
+        <button id="btn-insert-image" class="btn" title="Insert image from file or URL (Ctrl+Shift+I)">🖼️ Image</button>
         <button id="btn-export-md" class="btn" title="Export this document as a markdown file">Export MD</button>
         <button id="btn-export-html" class="btn" title="Export this document as compiled HTML layout">Export HTML</button>
         <button id="btn-help" class="btn" style="padding: 8px 10px;" title="Show Markdown formatting guide">?</button>
+        <input type="file" id="image-file-input" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/bmp,image/x-icon,image/avif" style="display: none;">
       </div>
     </header>
 
@@ -99,6 +117,18 @@
       <!-- Main workspace panel (Editor & Preview) -->
       <main class="main-workspace-panel glass-panel" id="main-workspace-panel">
         
+        <!-- Floating bubble specifically above the active referenced document -->
+        <div class="floating-doc-bubble" id="floating-doc-bubble" style="display: none;">
+          <div class="floating-doc-bubble-inner">
+            <span class="bubble-tag">REFERENCED FILE</span>
+            <span class="bubble-path" id="floating-bubble-path" title="Referenced external file">C:\path\to\file.md</span>
+          </div>
+          <div class="bubble-actions">
+            <button class="btn-bubble-action" id="btn-bubble-reveal" title="Show file in Windows Explorer">📂 Reveal</button>
+            <button class="btn-bubble-action btn-bubble-close" id="btn-bubble-close" title="Close referenced file from Aether (keeps file on disk)">✕</button>
+          </div>
+        </div>
+
         <!-- Left Pane: Editor -->
         <section class="editor-pane" id="editor-pane">
           <div class="pane-header">
@@ -188,6 +218,10 @@
             <span class="help-val">[Text](URL)</span>
           </div>
           <div class="help-item">
+            <span class="help-label">Image</span>
+            <span class="help-val">![Alt](URL) or ![Alt|300x200](URL)</span>
+          </div>
+          <div class="help-item">
             <span class="help-label">Code Block</span>
             <span class="help-val">```js\ncode...\n```</span>
           </div>
@@ -222,6 +256,22 @@
     <div class="restore-banner-actions">
       <button id="btn-restore-session" class="btn btn-primary" style="padding: 6px 12px; font-size: 11px; font-family: 'Outfit', sans-serif;">Restore</button>
       <button id="btn-dismiss-restore" class="restore-close-btn" title="Dismiss">&times;</button>
+    </div>
+  </div>
+
+  <!-- Image Lightbox Modal -->
+  <div class="modal-overlay" id="modal-lightbox">
+    <div class="modal-container glass-panel lightbox-modal-container">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding: 12px 18px;">
+        <h3 class="modal-title" id="lightbox-title" style="font-size: 14px; font-weight: 500; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Image Preview</h3>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button class="btn" id="lightbox-copy-btn" style="padding: 4px 8px; font-size: 11px;">Copy Link</button>
+          <button class="modal-close-btn" id="lightbox-close">&times;</button>
+        </div>
+      </div>
+      <div class="lightbox-content-wrapper">
+        <img id="lightbox-img" src="" alt="Expanded Image Preview">
+      </div>
     </div>
   </div>
 

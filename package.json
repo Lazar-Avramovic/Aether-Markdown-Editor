@@ -5,13 +5,14 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-packager . Aether --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon.ico"
+    "build": "electron-packager . Aether --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon.ico --asar --ignore=\"(\\.zip$|dist|test_icon|\\.git|node_modules)\"",
+    "register-associations": "powershell -ExecutionPolicy Bypass -File ./scripts/register-file-associations.ps1",
+    "unregister-associations": "powershell -ExecutionPolicy Bypass -File ./scripts/unregister-file-associations.ps1"
   },
   "author": "Antigravity",
   "license": "ISC",
-  "dependencies": {},
   "devDependencies": {
-    "electron": "^30.0.0",
-    "electron-packager": "^17.1.2"
+    "@electron/packager": "^20.3.0",
+    "electron": "^30.0.0"
   }
 }

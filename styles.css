@@ -1,5 +1,4 @@
 /* Aether CSS Design System & Layout */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   --bg-dark: #0d0e12;
@@ -427,6 +426,7 @@ body {
 
 /* Main Split Workspace Panel */
 .main-workspace-panel {
+  position: relative;
   display: flex;
   flex-grow: 1;
   min-width: 0;
@@ -724,6 +724,83 @@ body {
   height: 1px;
   background: linear-gradient(to right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01));
   margin: 2em 0;
+}
+
+/* Markdown Images inside previewer */
+.preview-content img,
+.preview-content .markdown-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  margin: 14px 0;
+  display: block;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: zoom-in;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.preview-content a img,
+.preview-content a .markdown-image {
+  cursor: pointer;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.preview-content img:hover,
+.preview-content .markdown-image:hover {
+  transform: translateY(-2px) scale(1.008);
+  box-shadow: 0 14px 40px rgba(0, 240, 255, 0.16);
+  border-color: rgba(0, 240, 255, 0.35);
+}
+
+.preview-content img.img-broken {
+  display: block;
+  min-height: 52px;
+  padding: 14px 18px;
+  border: 1px dashed rgba(255, 0, 80, 0.4);
+  background: rgba(255, 0, 80, 0.06);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--accent-magenta);
+  cursor: default;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Lightbox preview modal */
+.lightbox-modal-container {
+  max-width: 92vw;
+  max-height: 90vh;
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.lightbox-content-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.lightbox-content-wrapper img {
+  max-width: 88vw;
+  max-height: 76vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Drag and drop glowing feedback */
+.main-workspace-panel.image-drag-active {
+  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 50px rgba(0, 240, 255, 0.15) inset !important;
 }
 
 /* Sleek Floating Toast Notifications */
@@ -1093,6 +1170,27 @@ body {
   color: var(--text-muted);
 }
 
+[data-theme="light"] .preview-content img,
+[data-theme="light"] .preview-content .markdown-image {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .preview-content img:hover,
+[data-theme="light"] .preview-content .markdown-image:hover {
+  box-shadow: 0 12px 30px rgba(0, 114, 255, 0.2);
+  border-color: rgba(0, 114, 255, 0.4);
+}
+
+[data-theme="light"] .lightbox-content-wrapper {
+  background: rgba(240, 243, 248, 0.92);
+}
+
+[data-theme="light"] .lightbox-content-wrapper img {
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
 /* Sidebar VFS / Folders styling */
 .folder-item {
   color: #ffca28; /* Gold folder color */
@@ -1238,6 +1336,165 @@ body {
   background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.05);
   color: var(--text-secondary);
+}
+
+/* Sidebar Referenced File Item & Floating Bubble Above It */
+.referenced-file-group {
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.referenced-path-bubble {
+  margin-top: 0;
+  margin-bottom: 4px;
+  background: rgba(0, 240, 255, 0.06);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  box-shadow: 0 2px 8px rgba(0, 240, 255, 0.05);
+  cursor: default;
+}
+
+[data-theme="light"] .referenced-path-bubble {
+  background: rgba(0, 160, 220, 0.08);
+  border-color: rgba(0, 160, 220, 0.25);
+  color: var(--text-primary);
+}
+
+.referenced-file-node {
+  border-left: 2px solid var(--accent-cyan) !important;
+}
+
+.referenced-file-node:hover {
+  background: rgba(0, 240, 255, 0.08) !important;
+}
+
+[data-theme="light"] .referenced-file-node {
+  border-left: 2px solid #0099cc !important;
+}
+
+/* Floating bubble specifically above the active document editor */
+.floating-doc-bubble {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: rgba(13, 16, 24, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 240, 255, 0.15);
+  border-radius: 9999px;
+  pointer-events: auto;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 90%;
+  animation: bubbleSlideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes bubbleSlideDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.floating-doc-bubble:hover {
+  border-color: rgba(0, 240, 255, 0.65);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 25px rgba(0, 240, 255, 0.28);
+}
+
+[data-theme="light"] .floating-doc-bubble {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 160, 220, 0.4);
+  box-shadow: 0 8px 25px rgba(31, 38, 135, 0.12), 0 0 15px rgba(0, 160, 220, 0.15);
+}
+
+.floating-doc-bubble-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.floating-doc-bubble .bubble-tag {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 2px 7px;
+  background: rgba(0, 240, 255, 0.18);
+  color: var(--accent-cyan);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .floating-doc-bubble .bubble-tag {
+  background: rgba(0, 140, 200, 0.14);
+  color: #0077aa;
+}
+
+.floating-doc-bubble .bubble-path {
+  font-family: 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+[data-theme="light"] .floating-doc-bubble .bubble-path {
+  color: var(--text-primary);
+}
+
+.floating-doc-bubble .bubble-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.floating-doc-bubble .btn-bubble-action {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+[data-theme="light"] .floating-doc-bubble .btn-bubble-action {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
+}
+
+.floating-doc-bubble .btn-bubble-action:hover {
+  background: rgba(0, 240, 255, 0.2);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.floating-doc-bubble .btn-bubble-close:hover {
+  background: rgba(255, 75, 75, 0.25) !important;
+  border-color: rgba(255, 75, 75, 0.5) !important;
+  color: #ff6b6b !important;
 }
 
 /* Floating Restore Session Banner */

@@ -4,6 +4,7 @@ class MarkdownCompiler {
   constructor() {
     this.codeBlocks = [];
     this.inlineCode = [];
+    this.rawImages = [];
   }
 
   // Pre-processor to strictly escape raw HTML tags to prevent XSS
@@ -14,14 +15,162 @@ class MarkdownCompiler {
       .replace(/>/g, '&gt;');
   }
 
-  compile(markdownText) {
+  // Parse markdown image syntax: ![alt](url) with support for titles, sizes, and local paths
+  parseImages(text, basePath = '') {
+    let result = '';
+    let i = 0;
+    while (i < text.length) {
+      if (text[i] === '!' && text[i + 1] === '[') {
+        let closeBracket = text.indexOf(']', i + 2);
+        if (closeBracket !== -1 && text[closeBracket + 1] === '(') {
+          let openParen = closeBracket + 1;
+          let depth = 1;
+          let j = openParen + 1;
+          while (j < text.length && depth > 0) {
+            if (text[j] === '(') depth++;
+            else if (text[j] === ')') depth--;
+            if (depth > 0) j++;
+          }
+          if (depth === 0) {
+            let alt = text.slice(i + 2, closeBracket);
+            let target = text.slice(openParen + 1, j).trim();
+
+            let url = '';
+            let title = '';
+            let width = '';
+            let height = '';
+
+            // Check for angle bracket URL: <url>
+            if (target.startsWith('&lt;')) {
+              const closeAngle = target.indexOf('&gt;');
+              if (closeAngle !== -1) {
+                url = target.slice(4, closeAngle).trim();
+                target = target.slice(closeAngle + 4).trim();
+              }
+            } else if (target.startsWith('<')) {
+              const closeAngle = target.indexOf('>');
+              if (closeAngle !== -1) {
+                url = target.slice(1, closeAngle).trim();
+                target = target.slice(closeAngle + 1).trim();
+              }
+            }
+
+            if (!url) {
+              const titleMatch = target.match(/\s+["'](.*?)["']$/);
+              if (titleMatch) {
+                title = titleMatch[1];
+                target = target.slice(0, titleMatch.index).trim();
+              }
+
+              const sizeMatch = target.match(/\s+=([0-9]+)?x([0-9]+)?$/);
+              if (sizeMatch) {
+                if (sizeMatch[1]) width = sizeMatch[1];
+                if (sizeMatch[2]) height = sizeMatch[2];
+                target = target.slice(0, sizeMatch.index).trim();
+              }
+
+              url = target.trim();
+            } else {
+              const titleMatch = target.match(/["'](.*?)["']/);
+              if (titleMatch) title = titleMatch[1];
+              const sizeMatch = target.match(/=([0-9]+)?x([0-9]+)?/);
+              if (sizeMatch) {
+                if (sizeMatch[1]) width = sizeMatch[1];
+                if (sizeMatch[2]) height = sizeMatch[2];
+              }
+            }
+
+            // Check for size in alt: ![alt|300x200](url) or ![alt|300](url)
+            if (alt.includes('|')) {
+              const parts = alt.split('|');
+              const sizePart = parts[parts.length - 1].trim();
+              const altSizeMatch = sizePart.match(/^(\d+)(?:x(\d+))?$/);
+              if (altSizeMatch) {
+                parts.pop();
+                alt = parts.join('|').trim();
+                if (!width) width = altSizeMatch[1];
+                if (!height && altSizeMatch[2]) height = altSizeMatch[2];
+              }
+            }
+
+            let src = url;
+            // Block unsafe protocols
+            if (/^\s*(?:javascript|vbscript|data:(?!image\/)):/i.test(src)) {
+              src = '#';
+            } else if (basePath && !/^(?:[a-z]+:|\/\/)/i.test(src) && !src.startsWith('data:image/')) {
+              // Relative local file - resolve against active document directory
+              let cleanRel = src.replace(/^\.\//, '');
+              let resolved = (basePath.replace(/\\/g, '/') + '/' + cleanRel.replace(/\\/g, '/')).replace(/\/+/g, '/');
+              src = 'aether-media://file/' + resolved;
+            } else if (/^[a-zA-Z]:[\\\/]/.test(src)) {
+              let resolved = src.replace(/\\/g, '/');
+              src = 'aether-media://file/' + resolved;
+            } else if (src.startsWith('file:///')) {
+              let clean = src.replace(/^file:\/\/\/?/, '');
+              src = 'aether-media://file/' + clean.replace(/\\/g, '/');
+            }
+
+            const safeAlt = alt.replace(/"/g, '&quot;');
+            const safeTitle = title.replace(/"/g, '&quot;');
+            const safeSrc = src.replace(/"/g, '&quot;');
+
+            let attrs = `src="${safeSrc}" alt="${safeAlt}"`;
+            if (safeTitle) attrs += ` title="${safeTitle}"`;
+            if (width) attrs += ` width="${width}"`;
+            if (height) attrs += ` height="${height}"`;
+            attrs += ' loading="lazy" class="markdown-image" onerror="this.classList.add(\'img-broken\');"';
+
+            result += `<img ${attrs}>`;
+            i = j + 1;
+            continue;
+          }
+        }
+      }
+      result += text[i];
+      i++;
+    }
+    return result;
+  }
+
+  compile(markdownText, basePath = '') {
     this.codeBlocks = [];
     this.inlineCode = [];
+    this.rawImages = [];
 
     if (!markdownText) return '';
 
+    // 0. Protect safe raw <img> tags before HTML escaping
+    let text = markdownText.replace(/<img\s+([^>]*?)\s*\/?>/gi, (match, attrs) => {
+      if (/\bon\w+\s*=/i.test(attrs) || /javascript:/i.test(attrs)) {
+        return '';
+      }
+      const srcMatch = attrs.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      if (!srcMatch) return '';
+      let src = (srcMatch[1] || srcMatch[2] || srcMatch[3] || '').trim();
+
+      if (basePath && !/^(?:[a-z]+:|\/\/)/i.test(src) && !src.startsWith('data:image/')) {
+        let cleanRel = src.replace(/^\.\//, '');
+        let resolved = (basePath.replace(/\\/g, '/') + '/' + cleanRel.replace(/\\/g, '/')).replace(/\/+/g, '/');
+        src = 'aether-media://file/' + resolved;
+      } else if (/^[a-zA-Z]:[\\\/]/.test(src)) {
+        let resolved = src.replace(/\\/g, '/');
+        src = 'aether-media://file/' + resolved;
+      }
+
+      let safeTag = match.replace(/\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i, `src="${src.replace(/"/g, '&quot;')}"`);
+      if (!safeTag.includes('class=')) {
+        safeTag = safeTag.replace(/<img/i, '<img class="markdown-image" onerror="this.classList.add(\'img-broken\');"');
+      }
+      if (!safeTag.includes('loading=')) {
+        safeTag = safeTag.replace(/<img/i, '<img loading="lazy"');
+      }
+      const index = this.rawImages.length;
+      this.rawImages.push(safeTag);
+      return `RAWIMAGEPLACEHOLDER${index}PLACEHOLDER`;
+    });
+
     // 1. Escape all raw HTML first (XSS mitigation)
-    let html = this.escapeHTML(markdownText);
+    let html = this.escapeHTML(text);
 
     // 2. Protect Code Blocks (parse them first so their markdown content isn't converted)
     // Match ```lang\ncode\n```
@@ -75,6 +224,9 @@ class MarkdownCompiler {
     // Strikethrough: ~~text~~
     html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 
+    // 8.5 Images: ![alt](url) (Parsed before links so [![alt](img)](link) works and ![alt](img) is not mistaken for a link)
+    html = this.parseImages(html, basePath);
+
     // 9. Links: [text](url)
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
@@ -85,7 +237,7 @@ class MarkdownCompiler {
       const trimmed = block.trim();
       if (!trimmed) return '';
       // If it already starts with a block tag, return as is
-      const blockTags = /^(<h[1-6]|<ul|<ol|<blockquote|<pre|<hr|<div|<p)/i;
+      const blockTags = /^(<h[1-6]|<ul|<ol|<blockquote|<pre|<hr|<div|<p|<figure|<img)/i;
       if (blockTags.test(trimmed)) {
         return trimmed;
       }
@@ -109,6 +261,11 @@ class MarkdownCompiler {
         </div>
         <pre><code class="language-${block.lang}">${block.code}</code></pre>
       `;
+    });
+
+    // 13. Restore protected raw images
+    html = html.replace(/RAWIMAGEPLACEHOLDER(\d+)PLACEHOLDER/g, (match, index) => {
+      return this.rawImages[parseInt(index)] || '';
     });
 
     return html;
@@ -136,18 +293,24 @@ window.copyCode = function(button) {
   });
 };
 
-// Line Number Gutter Synchronization Utility
+// Line Number Gutter Synchronization Utility (Optimized with count caching)
 function updateLineNumbers(textarea, gutter) {
   if (!textarea || !gutter) return;
   
   const text = textarea.value;
-  const lineCount = text.split('\n').length;
-  
-  let html = '';
-  for (let i = 1; i <= lineCount; i++) {
-    html += `<span class="line-number-node">${i}</span>`;
+  let lineCount = 1;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) lineCount++;
   }
-  gutter.innerHTML = html;
+  
+  if (gutter._lastLineCount === lineCount) return;
+  gutter._lastLineCount = lineCount;
+
+  const chunks = new Array(lineCount);
+  for (let i = 0; i < lineCount; i++) {
+    chunks[i] = `<span class="line-number-node">${i + 1}</span>`;
+  }
+  gutter.innerHTML = chunks.join('');
 }
 
 // Bidirectional Scroll Sync Manager
