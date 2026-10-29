@@ -57,3 +57,7 @@ npm run unregister-associations
 - **Option 1 (Context Menu)**: Right-click any `.md` file $\rightarrow$ **Open with Aether**.
 - **Option 2 (Explorer "Open with")**: Right-click any `.md` file $\rightarrow$ **Open with** $\rightarrow$ **Choose another app** $\rightarrow$ select **Aether** $\rightarrow$ select **Always**.
 - **Option 3 (Windows Settings)**: Open **Settings** $\rightarrow$ **Apps** $\rightarrow$ **Default apps** $\rightarrow$ search `.md` $\rightarrow$ set to **Aether**.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full release history and milestone notes.

@@ -313,7 +313,7 @@ class AetherApp {
       return; // Already initialized, skip redundant disk writes & re-scans on every launch!
     }
 
-    const welcomeContent = `# Welcome to Aether 🌌 (v1.6.0)
+    const welcomeContent = `# Welcome to Aether 🌌 (v1.6.1)
 
 Aether is a premium, zero-gravity workspace featuring a Liquid Glass styling system and a Hierarchical Virtual File System (VFS).
 
@@ -495,7 +495,7 @@ You can include **bold**, *italic*, \`code\`, and [links](https://github.com) di
       modified = true;
     }
 
-    const welcomeContent = `# Welcome to Aether 🌌 (v1.6.0)
+    const welcomeContent = `# Welcome to Aether 🌌 (v1.6.1)
 
 Aether is a premium, zero-gravity workspace featuring a Liquid Glass styling system and a Hierarchical Virtual File System (VFS).
 
