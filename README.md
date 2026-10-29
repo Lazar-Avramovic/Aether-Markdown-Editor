@@ -12,6 +12,7 @@ A sleek, responsive zero-gravity desktop workspace designed for writing Markdown
 - **Rich Media & Paste Support**: Direct clipboard screenshot pasting (`Ctrl+V`), image drag-and-drop, workspace asset relative linking, and built-in Lightbox zoom preview.
 - **Multi-Instance Isolation**: Secondary application instances run in safe isolated sessions to prevent Chromium SQLite database lockups.
 - **Customizable Glassmorphism Themes**: Frosted glass panels over dynamic ambient background canvas orbs with dark and light presets.
+- **GFM Markdown Tables**: Full support for GitHub Flavored Markdown tables with column alignments (left, center, right), responsive horizontal scrolling, quick toolbar insertion, keyboard shortcut (`Ctrl+Shift+T`), and liquid glass frosted styling.
 
 <img width="1583" height="992" alt="image" src="https://github.com/user-attachments/assets/03df5711-a6fb-44e9-b12d-5a9af0a131ec" />
 

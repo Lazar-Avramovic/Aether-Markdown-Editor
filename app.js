@@ -21,6 +21,7 @@ class AetherApp {
     this.btnExportHtml = document.getElementById('btn-export-html');
     this.btnHelp = document.getElementById('btn-help');
     this.btnLineWrap = document.getElementById('btn-line-wrap');
+    this.btnInsertTable = document.getElementById('btn-insert-table');
     this.btnInsertImage = document.getElementById('btn-insert-image');
     this.imageFileInput = document.getElementById('image-file-input');
     this.btnThemeToggle = document.getElementById('btn-theme-toggle');
@@ -385,6 +386,25 @@ Reference images relative to your document on disk:
 - **Clipboard Paste**: Paste screenshots directly from your clipboard (**Ctrl+V**).
 - **Drag & Drop**: Drag image files from Windows Explorer right into the editor.
 - **Insert Button**: Click **🖼️ Image** in the header or press **Ctrl+Shift+I**.
+
+## Tables 📊
+Aether provides full support for GitHub Flavored Markdown (GFM) tables with custom alignments, liquid glass borders, and responsive horizontal scrolling.
+
+| Feature | Type | Status |
+| :--- | :---: | ---: |
+| Left-aligned column | Text | Ready |
+| Centered column | Icon | ✨ Active |
+| Right-aligned column | Numeric | \$1,250.00 |
+
+### Inline Elements in Tables
+You can include **bold**, *italic*, \`code\`, and [links](https://github.com) directly inside table cells:
+
+| Syntax | Description | Example |
+| :--- | :--- | :--- |
+| \`**Bold**\` | Strong typography | **Priority High** |
+| \`*Italic*\` | Emphasized typography | *Review needed* |
+| \`\`Code\`\` | Inline code / commands | \`git commit -m "fix"\` |
+| \`<br>\` | Multi-line row cell | Line 1<br>Line 2 |
 `;
 
     // 2. Overwrite/save welcome_guide.md on startup
@@ -548,6 +568,25 @@ Reference images relative to your document on disk:
 - **Clipboard Paste**: Paste screenshots directly from your clipboard (**Ctrl+V**).
 - **Drag & Drop**: Drag image files from Windows Explorer right into the editor.
 - **Insert Button**: Click **🖼️ Image** in the header or press **Ctrl+Shift+I**.
+
+## Tables 📊
+Aether provides full support for GitHub Flavored Markdown (GFM) tables with custom alignments, liquid glass borders, and responsive horizontal scrolling.
+
+| Feature | Type | Status |
+| :--- | :---: | ---: |
+| Left-aligned column | Text | Ready |
+| Centered column | Icon | ✨ Active |
+| Right-aligned column | Numeric | \$1,250.00 |
+
+### Inline Elements in Tables
+You can include **bold**, *italic*, \`code\`, and [links](https://github.com) directly inside table cells:
+
+| Syntax | Description | Example |
+| :--- | :--- | :--- |
+| \`**Bold**\` | Strong typography | **Priority High** |
+| \`*Italic*\` | Emphasized typography | *Review needed* |
+| \`\`Code\`\` | Inline code / commands | \`git commit -m "fix"\` |
+| \`<br>\` | Multi-line row cell | Line 1<br>Line 2 |
 `;
 
     // 2. Overwrite / regenerate welcome_guide.md on startup
@@ -887,6 +926,9 @@ Reference images relative to your document on disk:
         if (this.modalLightbox && this.modalLightbox.classList.contains('active')) {
           this.closeImageLightbox();
         }
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+        e.preventDefault();
+        this.insertTableTemplate();
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i')) {
         e.preventDefault();
         this.handleInsertImageAction();
@@ -900,6 +942,13 @@ Reference images relative to your document on disk:
         this.textarea.select();
       }
     });
+
+    // Table Insert Button Trigger
+    if (this.btnInsertTable) {
+      this.btnInsertTable.addEventListener('click', () => {
+        this.insertTableTemplate();
+      });
+    }
 
     // Image Insert Button & File Input Triggers
     if (this.btnInsertImage) {
@@ -1169,6 +1218,13 @@ Reference images relative to your document on disk:
     this.updateCounts();
     this.updateStateIndicator('Syncing...');
     this.debouncedSave();
+  }
+
+  // Insert markdown table template at cursor position
+  insertTableTemplate() {
+    const tableTemplate = `\n| Column 1 | Column 2 | Column 3 |\n| :--- | :---: | ---: |\n| Item 1 | Details | $10.00 |\n| Item 2 | Details | $20.00 |\n`;
+    this.insertTextAtCursor(tableTemplate);
+    this.showToast("Table template inserted", "success");
   }
 
   // Open Lightbox image zoom modal
@@ -2192,6 +2248,24 @@ Reference images relative to your document on disk:
       height: auto;
       border-radius: 8px;
       margin: 16px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px 14px;
+      border: 1px solid #ddd;
+    }
+    th {
+      background: #f7f7f7;
+      font-weight: 600;
+      text-align: left;
+    }
+    tr:nth-child(even) {
+      background: #fafafa;
     }
   </style>
 </head>

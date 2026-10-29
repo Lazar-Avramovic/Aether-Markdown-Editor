@@ -132,6 +132,153 @@ class MarkdownCompiler {
     return result;
   }
 
+  // Split a markdown table row into cells, respecting escaped pipes \|
+  splitTableRow(row) {
+    let trimmed = row.trim();
+    if (trimmed.startsWith('|')) {
+      trimmed = trimmed.slice(1);
+    }
+    if (trimmed.endsWith('|')) {
+      let backslashes = 0;
+      for (let j = trimmed.length - 2; j >= 0 && trimmed[j] === '\\'; j--) {
+        backslashes++;
+      }
+      if (backslashes % 2 === 0) {
+        trimmed = trimmed.slice(0, -1);
+      }
+    }
+
+    const cells = [];
+    let current = '';
+    let backslashes = 0;
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const char = trimmed[i];
+      if (char === '\\') {
+        backslashes++;
+        current += char;
+      } else if (char === '|' && backslashes % 2 === 0) {
+        cells.push(current.trim());
+        current = '';
+        backslashes = 0;
+      } else {
+        current += char;
+        backslashes = 0;
+      }
+    }
+    cells.push(current.trim());
+
+    return cells.map(cell => {
+      // Unescape escaped pipes
+      let unescaped = cell.replace(/\\\|/g, '|');
+      // Support manual <br> tags within table cells
+      unescaped = unescaped.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+      return unescaped;
+    });
+  }
+
+  // Validate delimiter row (e.g. | :--- | :---: | ---: |)
+  isDelimiterRow(row) {
+    if (!row || !row.includes('-')) return false;
+    const cells = this.splitTableRow(row);
+    if (cells.length === 0) return false;
+    return cells.every(c => /^\s*:?-{1,}:?\s*$/.test(c));
+  }
+
+  // Extract alignment styles from delimiter cells
+  parseAlignments(delimCells) {
+    return delimCells.map(cell => {
+      const trimmed = cell.trim();
+      const left = trimmed.startsWith(':');
+      const right = trimmed.endsWith(':');
+      if (left && right) return 'center';
+      if (right) return 'right';
+      if (left) return 'left';
+      return '';
+    });
+  }
+
+  // Parse GFM Markdown Tables into HTML tables wrapped in a responsive scroll container
+  parseTables(html) {
+    const lines = html.split('\n');
+    const result = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+      const nextLine = (i + 1 < lines.length) ? lines[i + 1] : null;
+
+      // Check if current line and next line form a valid table header and delimiter
+      if (nextLine !== null && (line.includes('|') || nextLine.includes('|')) && this.isDelimiterRow(nextLine)) {
+        const headerCells = this.splitTableRow(line);
+        const delimCells = this.splitTableRow(nextLine);
+
+        if (headerCells.length > 0 && delimCells.length > 0 && headerCells.length === delimCells.length) {
+          const colCount = delimCells.length;
+          const alignments = this.parseAlignments(delimCells);
+
+          let tableHtml = '<div class="table-container"><table class="markdown-table"><thead><tr>';
+          for (let c = 0; c < colCount; c++) {
+            const alignStyle = alignments[c] ? ` style="text-align: ${alignments[c]};"` : '';
+            tableHtml += `<th${alignStyle}>${headerCells[c] || ''}</th>`;
+          }
+          tableHtml += '</tr></thead>';
+
+          // Collect body rows
+          const bodyRows = [];
+          let j = i + 2;
+          while (j < lines.length) {
+            const rowLine = lines[j];
+            const trimmedRow = rowLine.trim();
+
+            if (trimmedRow === '') break;
+            // Stop if another block begins (e.g. code block or heading)
+            if (/^```/.test(trimmedRow) || /^#{1,6}\s/.test(trimmedRow)) break;
+            // Must contain pipe to be a valid table row
+            if (!rowLine.includes('|')) break;
+
+            const rowCells = this.splitTableRow(rowLine);
+            // Pad or clamp to column count
+            const normalizedCells = [];
+            for (let c = 0; c < colCount; c++) {
+              normalizedCells.push(rowCells[c] !== undefined ? rowCells[c] : '');
+            }
+            bodyRows.push(normalizedCells);
+            j++;
+          }
+
+          if (bodyRows.length > 0) {
+            tableHtml += '<tbody>';
+            for (const row of bodyRows) {
+              tableHtml += '<tr>';
+              for (let c = 0; c < colCount; c++) {
+                const alignStyle = alignments[c] ? ` style="text-align: ${alignments[c]};"` : '';
+                tableHtml += `<td${alignStyle}>${row[c]}</td>`;
+              }
+              tableHtml += '</tr>';
+            }
+            tableHtml += '</tbody>';
+          }
+
+          tableHtml += '</table></div>';
+
+          // Separate with blank lines so surrounding paragraphs are clean
+          result.push('');
+          result.push(tableHtml);
+          result.push('');
+
+          i = j;
+          continue;
+        }
+      }
+
+      result.push(line);
+      i++;
+    }
+
+    return result.join('\n');
+  }
+
   compile(markdownText, basePath = '') {
     this.codeBlocks = [];
     this.inlineCode = [];
@@ -187,6 +334,9 @@ class MarkdownCompiler {
       return `INLINECODEPLACEHOLDER${index}PLACEHOLDER`;
     });
 
+    // 3.5 Tables (GFM Markdown Tables - parsed before lists, rules, and inline styling)
+    html = this.parseTables(html);
+
     // 4. Headers (matched only at beginning of lines)
     html = html.replace(/^###### (.*)$/gm, '<h6>$1</h6>');
     html = html.replace(/^##### (.*)$/gm, '<h5>$1</h5>');
@@ -203,12 +353,18 @@ class MarkdownCompiler {
     // 6. Lists
     // Unordered Lists (* or -)
     html = html.replace(/^\s*[\*\-]\s+(.*)$/gm, '<li-u>$1</li-u>');
-    html = html.replace(/((?:<li-u>.*<\/li-u>\s*)+)/g, '<ul>$1</ul>');
+    html = html.replace(/((?:<li-u>.*<\/li-u>\s*)+)/g, (match) => {
+      const items = match.trim().replace(/<\/li-u>\s*<li-u>/g, '</li-u>\n<li-u>');
+      return `\n\n<ul>\n${items}\n</ul>\n\n`;
+    });
     html = html.replace(/<li-u>/g, '<li>').replace(/<\/li-u>/g, '</li>');
 
     // Ordered Lists (1. or 2.)
     html = html.replace(/^\s*\d+\.\s+(.*)$/gm, '<li-o>$1</li-o>');
-    html = html.replace(/((?:<li-o>.*<\/li-o>\s*)+)/g, '<ol>$1</ol>');
+    html = html.replace(/((?:<li-o>.*<\/li-o>\s*)+)/g, (match) => {
+      const items = match.trim().replace(/<\/li-o>\s*<li-o>/g, '</li-o>\n<li-o>');
+      return `\n\n<ol>\n${items}\n</ol>\n\n`;
+    });
     html = html.replace(/<li-o>/g, '<li>').replace(/<\/li-o>/g, '</li>');
 
     // 7. Horizontal Rules (--- or *** or ___)
@@ -237,7 +393,7 @@ class MarkdownCompiler {
       const trimmed = block.trim();
       if (!trimmed) return '';
       // If it already starts with a block tag, return as is
-      const blockTags = /^(<h[1-6]|<ul|<ol|<blockquote|<pre|<hr|<div|<p|<figure|<img)/i;
+      const blockTags = /^(<h[1-6]|<ul|<ol|<blockquote|<pre|<hr|<div|<p|<figure|<img|<table|CODEBLOCKPLACEHOLDER)/i;
       if (blockTags.test(trimmed)) {
         return trimmed;
       }

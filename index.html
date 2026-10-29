@@ -59,6 +59,7 @@
         <span id="save-indicator" style="font-size: 11px; margin-right: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-cyan);">Saved</span>
         <button id="btn-theme-toggle" class="btn" title="Toggle Light/Dark theme">🌓 Theme: Dark</button>
         <button id="btn-line-wrap" class="btn" title="Toggle line wrapping inside the text editor">Wrap: OFF</button>
+        <button id="btn-insert-table" class="btn" title="Insert markdown table (Ctrl+Shift+T)">📊 Table</button>
         <button id="btn-insert-image" class="btn" title="Insert image from file or URL (Ctrl+Shift+I)">🖼️ Image</button>
         <button id="btn-export-md" class="btn" title="Export this document as a markdown file">Export MD</button>
         <button id="btn-export-html" class="btn" title="Export this document as compiled HTML layout">Export HTML</button>
@@ -224,6 +225,10 @@
           <div class="help-item">
             <span class="help-label">Code Block</span>
             <span class="help-val">```js\ncode...\n```</span>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Table</span>
+            <span class="help-val">| Col 1 | Col 2 |\n|---|---|\n| Val 1 | Val 2 |</span>
           </div>
         </div>
       </div>
